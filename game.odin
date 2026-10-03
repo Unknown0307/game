@@ -86,6 +86,15 @@ begin_playing :: proc(g: ^Game) {
 	g.phase     = .Playing
 	reset_level_timers(g)
 	if g.params.is_boss_level do spawn_boss(g)
+	if g.level == SKILL_GIFT_LEVEL do gift_skill_dice(g)
+}
+
+// One skill die next to each living player (picked up like any other die).
+gift_skill_dice :: proc(g: ^Game) {
+	for p in g.players {
+		if p.dead do continue
+		spawn_skill_pickup(g, player_center(p) + [2]f32{0, -70})
+	}
 }
 
 begin_level_complete :: proc(g: ^Game) {

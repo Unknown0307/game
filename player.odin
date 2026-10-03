@@ -51,7 +51,7 @@ make_player :: proc(index: int) -> Player {
 // Brings a dead player back at the start of a new level.
 revive_player :: proc(p: ^Player) {
 	p.dead = false
-	p.tag_count = 0
+	p.health_points = 0
 	p.shield_ticks = {}
 	p.skill_cd = {}
 	p.fire_cd = 0
@@ -77,7 +77,7 @@ player_rect :: proc(p: Player) -> rl.Rectangle {
 
 // Share of tags a player has left before dying (1.0 = full, 0.0 = dead)
 health_fraction :: proc(p: Player) -> f32 {
-	return max(0, 1 - f32(p.tag_count) / f32(MAX_TAGS))
+	return max(0, 1 - f32(p.health_points) / f32(MAX_HEALTH))
 }
 
 total_score :: proc(g: ^Game) -> i32 {
@@ -240,14 +240,14 @@ hurt_player :: proc(g: ^Game, p: ^Player, amount: i32) {
 	reduction: f32 = 1.0
 	for _ in 0 ..< count_enhancement(p^, .Damage) do reduction *= 0.90
 	effective := max(1, i32(math.ceil(f32(amount) * reduction)))
-	p.tag_count += effective
+	p.health_points += effective
 	p.hurt_flash = 0.3
 	center := player_center(p^)
 	spawn_burst(g, center, rl.RED, int(8 + effective * 2), 170, 3)
 	add_shake(g, min(3 + f32(effective), 12))
 
-	if p.tag_count >= MAX_TAGS {
-		p.tag_count = MAX_TAGS
+	if p.health_points >= MAX_HEALTH {
+		p.health_points = MAX_HEALTH
 		p.dead = true
 		p.shield_ticks = {}
 		p.invis_ticks = 0

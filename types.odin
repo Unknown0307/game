@@ -114,7 +114,7 @@ Player :: struct {
 	speed:         f32,
 	knock:         [2]f32, // knock-back velocity (boss repel), decays over time
 	kill_count:    i32,
-	tag_count:     i32,
+	health_points:     i32,
 	dead:          bool,
 	coins:         i32,
 	score:         i32,

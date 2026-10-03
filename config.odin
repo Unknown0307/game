@@ -31,7 +31,7 @@ SPIT_TIME        :: 1.1  // ships are flung back out of the black hole (seconds)
 
 // --- Player ---
 PLAYER_MAX_SPEED  :: 300.0
-MAX_TAGS          :: 50 // a player dies after this many tags
+MAX_HEALTH          :: 50 // a player dies after this many tags
 REPULSION_RADIUS  :: 180.0
 
 MAP_DIAGONAL :: 1000.0 // sqrt(SCREEN_W^2 + SCREEN_H^2): the longest straight line on the map
@@ -80,6 +80,7 @@ SKILL_BOSS_LEVEL_INTERVAL  :: 10     // set to BOSS_LEVEL_INTERVAL to let every 
 SKILL_PICKUP_LIFETIME      :: 20.0
 SKILL_PICKUP_RADIUS        :: 14.0
 MAX_SKILL_PICKUPS          :: 4
+SKILL_GIFT_LEVEL           :: 4     // on this level every player is given one skill die at the start
 
 // --- Mothership boss skin (the alternative to the space whale) ---
 MOTHERSHIP_CHANCE                :: 0.5
@@ -146,7 +147,7 @@ BOSS_HP_PER_TIER    :: 10         // +10 hp each time a boss appears
 BOSS_RADIUS         :: 48.0
 BOSS_BASE_SPEED     :: 215.0
 BOSS_SPEED_CAP      :: 0.92       // fraction of player speed the boss can never exceed
-BOSS_DAMAGE         :: 12
+BOSS_DAMAGE         :: 10
 BOSS_HIT_COOLDOWN   :: 0.9
 BOSS_SCORE          :: 300
 
@@ -160,7 +161,7 @@ BOSS_DASH_RANGE        :: 430.0
 BOSS_DASH_WINDUP       :: 0.65  // telegraph time (boss stands still, aiming)
 BOSS_DASH_TIME         :: 0.50
 BOSS_DASH_SPEED        :: 640.0
-BOSS_DASH_COOLDOWN     :: 4.5
+BOSS_DASH_COOLDOWN     :: 6.0
 BOSS_DASH_FIRST_DELAY  :: 3.0
 
 // Boss repel ability (every boss)
@@ -190,12 +191,12 @@ BULLET_DAMAGE   :: 1
 BULLET_LIFETIME :: 3.0
 MAX_BULLETS     :: 240
 
-LASER_TICKS              :: 15    // how long the beam stays on
+LASER_TICKS              :: 10    // how long the beam stays on
 // The laser cruiser's beam now runs from its centre to the END OF THE MAP (see laser_length in gunfire.odin).
-LASER_COOLDOWN_TICKS     :: 20    // pause after the beam switches off
+LASER_COOLDOWN_TICKS     :: 60    // pause after the beam switches off
 LASER_TRIGGER_RANGE      :: MAP_DIAGONAL // fires at any target on the map (it still has to face it and be on-screen)
 LASER_WIDTH              :: 7.0
-LASER_DAMAGE             :: 2
+LASER_DAMAGE             :: 1
 LASER_HIT_INTERVAL_TICKS :: 5     // the beam hurts every 5 ticks (3 hits per shot)
 
 // --- Enhancements ---

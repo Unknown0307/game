@@ -97,9 +97,9 @@ heal_from_allies :: proc(g: ^Game, p: ^Player) {
 			continue
 		}
 
-		if p.tag_count > 0 {
-			healed := min(HEAL_AMOUNT, p.tag_count)
-			p.tag_count -= healed
+		if p.health_points > 0 {
+			healed := min(HEAL_AMOUNT, p.health_points)
+			p.health_points -= healed
 			a.active = false
 			spawn_burst(g, a.pos, rl.LIME, 30, 220, 3.5)
 			spawn_burst(g, player_center(p^), rl.LIME, 20, 140, 3)
