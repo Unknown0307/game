@@ -1,0 +1,471 @@
+package main
+
+import "core:math"
+import "core:math/linalg"
+import "core:math/rand"
+import rl "vendor:raylib"
+
+// =============================================================================
+// skills.odin - the skill system (separate from enhancements) and the players' gun.
+//
+//  * Players start with NO skill. Skill dice drop from enemies (very rarely) and
+//    from "10th level" bosses (25%). Touching a die rolls a random skill, which
+//    becomes the taken skill. Owned skills can be cycled with the cycle key.
+//  * The common ability of every player is the gun: hold the fire key to shoot
+//    from the two wing guns. (Rocket skill: the gun fires rockets instead.)
+//  * Skills:  Explosion    - the old repel blast (cooldown 120 ticks)
+//             Rocket       - passive while taken: rockets, 40 tick cooldown
+//             Invisibility - 5 s (300 ticks) invulnerable, 10 s (600 ticks) cooldown
+//             Surprise     - 40 ticks: everything that touches you is reflected
+//                            (and can hurt the OTHER player), 15 s (900 ticks) cooldown
+//  * All cooldowns are counted in the fixed 60 Hz ticks (update_ticks in game.odin).
+// =============================================================================
+
+// --- Skill metadata ---
+
+skill_name :: proc(kind: SkillKind) -> cstring {
+	switch kind {
+	case .Explosion:    return "EXPLOSION"
+	case .Rocket:       return "ROCKET BULLETS"
+	case .Invisibility: return "INVISIBILITY"
+	case .Surprise:     return "SURPRISE"
+	case .None:         return "NO SKILL"
+	}
+	return ""
+}
+
+skill_label :: proc(kind: SkillKind) -> cstring {
+	switch kind {
+	case .Explosion:    return "EXP"
+	case .Rocket:       return "RKT"
+	case .Invisibility: return "INV"
+	case .Surprise:     return "SUR"
+	case .None:         return "-"
+	}
+	return "-"
+}
+
+skill_color :: proc(kind: SkillKind) -> rl.Color {
+	switch kind {
+	case .Explosion:    return rl.Color{255, 160, 50, 255}
+	case .Rocket:       return rl.Color{255, 85, 85, 255}
+	case .Invisibility: return rl.Color{120, 230, 255, 255}
+	case .Surprise:     return rl.Color{230, 110, 255, 255}
+	case .None:         return rl.Color{150, 150, 160, 255}
+	}
+	return rl.WHITE
+}
+
+// Base cooldown (ticks) before the Cooldown enhancement is applied.
+skill_base_cooldown :: proc(kind: SkillKind) -> i32 {
+	switch kind {
+	case .Explosion:    return EXPLOSION_COOLDOWN_TICKS
+	case .Rocket:       return ROCKET_COOLDOWN_TICKS
+	case .Invisibility: return INVIS_COOLDOWN_TICKS
+	case .Surprise:     return SURPRISE_COOLDOWN_TICKS
+	case .None:         return 0
+	}
+	return 0
+}
+
+// The Cooldown enhancement (-10% per copy) shortens every skill cooldown.
+skill_cooldown :: proc(p: Player, base: i32) -> i32 {
+	return max(1, i32(math.round(f32(base) * ability_cooldown_multiplier(p))))
+}
+
+player_invulnerable :: proc(p: Player) -> bool {
+	return p.invis_ticks > 0 || p.surprise_ticks > 0
+}
+
+// --- Owning / taking skills ---
+
+grant_skill :: proc(g: ^Game, p: ^Player, kind: SkillKind) {
+	if kind == .None do return
+	p.skills_owned[kind] = true
+	p.skill = kind
+	c := player_center(p^)
+	col := skill_color(kind)
+	spawn_burst(g, c, col, 36, 240, 3.5)
+	spawn_ring(g, c, rl.WHITE, 24, 200, 0.4, 3)
+	add_float(g, c + [2]f32{0, -18}, i32(kind), .Skill)
+}
+
+// Takes the next owned skill (in wheel order).
+cycle_skill :: proc(g: ^Game, p: ^Player) {
+	order := SKILLS
+	start := 0
+	for k, i in order {
+		if k == p.skill do start = i
+	}
+	for step in 1 ..= len(order) {
+		k := order[(start + step) % len(order)]
+		if p.skills_owned[k] {
+			if k != p.skill {
+				p.skill = k
+				spawn_burst(g, player_center(p^), skill_color(k), 12, 120, 2.5)
+			}
+			return
+		}
+	}
+}
+
+// --- Using skills ---
+
+activate_skill :: proc(g: ^Game, p: ^Player) {
+	if p.skill == .None || p.skill_cd[p.skill] > 0 do return
+	c := player_center(p^)
+	switch p.skill {
+	case .Explosion:
+		use_explosion(g, p)
+	case .Invisibility:
+		p.invis_ticks = INVIS_DURATION_TICKS
+		p.skill_cd[.Invisibility] = skill_cooldown(p^, INVIS_COOLDOWN_TICKS)
+		spawn_ring(g, c, skill_color(.Invisibility), 30, 220, 0.4, 3)
+		spawn_burst(g, c, rl.WHITE, 16, 160, 2.5)
+	case .Surprise:
+		p.surprise_ticks = SURPRISE_DURATION_TICKS
+		p.skill_cd[.Surprise] = skill_cooldown(p^, SURPRISE_COOLDOWN_TICKS)
+		spawn_ring(g, c, skill_color(.Surprise), 36, 300, 0.4, 3.5)
+		add_shake(g, 3)
+	case .Rocket, .None:
+		// Rocket is passive: it changes what the gun fires.
+	}
+}
+
+// Explosion: kills regular enemies in range, damages bosses (the old repel blast).
+use_explosion :: proc(g: ^Game, p: ^Player) {
+	center := player_center(p^)
+	p.skill_cd[.Explosion] = skill_cooldown(p^, EXPLOSION_COOLDOWN_TICKS)
+	p.visual_timer = BLAST_VISUAL_TIME
+	add_shake(g, 4)
+	spawn_ring(g, center, p.color, 40, 450, 0.3, 3)
+
+	for &e in g.enemies {
+		if !e.active do continue
+		offset := closest_wrapped_pos(e, center) - center // the boss may be across a screen border
+		dist := linalg.length(offset)
+		if dist - e.radius >= REPULSION_RADIUS do continue
+
+		if e.kind == .Boss {
+			e.hp -= 1
+			e.flash = 0.15
+			spawn_burst(g, e.pos, rl.WHITE, 14, 260, 3)
+			if e.hp <= 0 {
+				kill_enemy(g, &e, p)
+			} else {
+				if dist > 0.001 do e.pos += offset / dist * 70 // knock-back
+				add_shake(g, 6)
+			}
+		} else {
+			kill_enemy(g, &e, p)
+		}
+	}
+}
+
+// --- The gun ---
+
+// Muzzle position in ship-local pixels (x = forward, y = sideways). side = -1 / +1.
+muzzle_local :: proc(p: Player, side: f32) -> [2]f32 {
+	switch p.ship {
+	case .Fighter:
+		// The two short wing guns of the Dart.
+		return {p.size.x * 0.5 * 0.42, side * p.size.y * 0.5 * 0.62}
+	case .Interceptor:
+		// The boom-tip guns of the Bulwark.
+		u := max(p.size.x, p.size.y) * 0.5
+		return {u * 1.17, side * u * 0.78}
+	}
+	return {}
+}
+
+muzzle_world :: proc(p: Player, side: f32) -> [2]f32 {
+	return player_center(p) + rotate_vec(muzzle_local(p, side), p.angle)
+}
+
+add_bullet :: proc(g: ^Game, b: Bullet) {
+	for &slot in g.bullets {
+		if slot.active do continue
+		slot = b
+		slot.active = true
+		return
+	}
+}
+
+// One shot from the next wing gun (the guns alternate).
+fire_gun :: proc(g: ^Game, p: ^Player, index: i32) {
+	side: f32 = 1 if p.gun_flip else -1
+	p.gun_flip = !p.gun_flip
+	p.muzzle_flash[0 if side < 0 else 1] = 0.09
+
+	muzzle := muzzle_world(p^, side)
+	dir := [2]f32{math.cos(p.angle), math.sin(p.angle)}
+	col := p.color
+
+	if p.skill == .Rocket {
+		add_bullet(g, Bullet{
+			pos = muzzle, vel = dir * ROCKET_SPEED, life = 4.0,
+			from_player = true, rocket = true, owner = index,
+			range_left = ROCKET_RANGE_SHIPS * p.size.x,
+		})
+		p.fire_cd = skill_cooldown(p^, ROCKET_COOLDOWN_TICKS)
+		spawn_burst(g, muzzle, skill_color(.Rocket), 6, 120, 2.5)
+		add_shake(g, 1)
+	} else {
+		add_bullet(g, Bullet{
+			pos = muzzle, vel = dir * PLAYER_BULLET_SPEED, life = 2.0,
+			from_player = true, owner = index,
+			range_left = PLAYER_BULLET_RANGE_SHIPS * p.size.x,
+		})
+		p.fire_cd = PLAYER_FIRE_COOLDOWN_TICKS
+		spawn_burst(g, muzzle, col, 3, 90, 2)
+	}
+}
+
+// Regular enemies die, bosses lose `amount` hp.
+damage_enemy :: proc(g: ^Game, e: ^Enemy, amount: i32, killer: ^Player, hit_pos: [2]f32) {
+	if e.kind == .Boss {
+		e.hp -= amount
+		e.flash = 0.12
+		spawn_burst(g, hit_pos, rl.WHITE, 6, 180, 2.5)
+		if e.hp <= 0 {
+			kill_enemy(g, e, killer)
+		} else {
+			add_shake(g, 2)
+		}
+	} else {
+		kill_enemy(g, e, killer)
+	}
+}
+
+rocket_explode :: proc(g: ^Game, pos: [2]f32, shooter: ^Player) {
+	col := skill_color(.Rocket)
+	spawn_burst(g, pos, col, 22, 260, 3.5)
+	spawn_burst(g, pos, rl.Color{255, 220, 120, 255}, 12, 180, 3)
+	spawn_ring(g, pos, col, 22, 230, 0.25, 3)
+	add_shake(g, 3)
+
+	for &e in g.enemies {
+		if !e.active do continue
+		epos := closest_wrapped_pos(e, pos)
+		if linalg.length(epos - pos) - e.radius <= ROCKET_BLAST_RADIUS {
+			damage_enemy(g, &e, ROCKET_BOSS_DAMAGE, shooter, epos)
+		}
+	}
+}
+
+// Player shots hurt enemies only. Called from update_bullets.
+update_player_shot :: proc(g: ^Game, b: ^Bullet, dt: f32) {
+	b.pos += b.vel * dt
+	b.range_left -= linalg.length(b.vel) * dt
+	b.life -= dt
+	shooter := &g.players[b.owner]
+
+	r: f32 = PLAYER_BULLET_RADIUS
+	if b.rocket do r = 5
+
+	for &e in g.enemies {
+		if !e.active do continue
+		epos := closest_wrapped_pos(e, b.pos)
+		if linalg.length(epos - b.pos) > e.radius + r do continue
+
+		if b.rocket {
+			rocket_explode(g, b.pos, shooter)
+		} else {
+			damage_enemy(g, &e, PLAYER_BULLET_BOSS_DAMAGE, shooter, b.pos)
+			spawn_burst(g, b.pos, shooter.color, 4, 120, 2)
+		}
+		b.active = false
+		return
+	}
+
+	if b.range_left <= 0 || b.life <= 0 {
+		if b.rocket do rocket_explode(g, b.pos, shooter) // rockets detonate at the end of their range
+		b.active = false
+		return
+	}
+	if outside_play_area(b.pos, 0) do b.active = false
+}
+
+// --- Surprise: reflecting ---
+
+reflect_bullet :: proc(g: ^Game, b: ^Bullet, p: ^Player, index: i32) {
+	c := player_center(p^)
+	dir := linalg.normalize0(b.pos - c)
+	if linalg.length(dir) < 0.001 do dir = linalg.normalize0(-b.vel)
+	b.vel = dir * max(linalg.length(b.vel), BULLET_SPEED) * 1.25
+	b.pos += dir * 6
+	b.reflected = true
+	b.owner = index
+	b.life = BULLET_LIFETIME
+	spawn_burst(g, b.pos, p.color, 6, 160, 2.5)
+}
+
+// A reflected enemy flies away from the player as a missile. It will not hurt the
+// player who reflected it, but it can hurt the other player. (Bosses are only knocked back.)
+reflect_enemy :: proc(g: ^Game, e: ^Enemy, p: ^Player, index: i32, epos: [2]f32) {
+	pc := player_center(p^)
+	off := epos - pc
+	dir := linalg.normalize0(off)
+	if linalg.length(dir) < 0.001 {
+		ang := rand.float32_range(0, 2 * math.PI)
+		dir = {math.cos(ang), math.sin(ang)}
+	}
+
+	spawn_burst(g, pc + dir * 14, p.color, 14, 220, 3)
+	spawn_ring(g, pc, skill_color(.Surprise), 18, 240, 0.3, 3)
+	add_shake(g, 5)
+
+	if e.kind == .Boss {
+		e.hit_cd = BOSS_HIT_COOLDOWN
+		e.dash_t = 0
+		e.dash_windup = 0
+		e.pos += dir * 160
+		return
+	}
+
+	e.reflect_ticks = SURPRISE_REFLECT_TICKS
+	e.reflect_owner = index
+	e.reflect_vel = dir * SURPRISE_REFLECT_SPEED
+	e.heading = dir
+	e.angle = math.atan2(dir.y, dir.x)
+	e.flash = 0.15
+	e.pos = pc + dir * (max(p.size.x, p.size.y) * 0.5 + e.radius + 4)
+}
+
+// Per frame: reflected enemies fly on a straight line instead of chasing.
+move_reflected_enemy :: proc(g: ^Game, e: ^Enemy, dt: f32) {
+	e.pos += e.reflect_vel * dt
+	e.angle = math.atan2(e.reflect_vel.y, e.reflect_vel.x)
+	owner := &g.players[e.reflect_owner]
+	spawn_particle(g, e.pos, {0, 0}, owner.color, 0.3, 4)
+}
+
+// --- Ticks ---
+
+tick_player_skills :: proc(p: ^Player) {
+	for k in SkillKind {
+		if p.skill_cd[k] > 0 do p.skill_cd[k] -= 1
+	}
+	if p.fire_cd > 0        do p.fire_cd -= 1
+	if p.invis_ticks > 0    do p.invis_ticks -= 1
+	if p.surprise_ticks > 0 do p.surprise_ticks -= 1
+}
+
+tick_reflected_enemies :: proc(g: ^Game) {
+	for &e in g.enemies {
+		if e.active && e.reflect_ticks > 0 do e.reflect_ticks -= 1
+	}
+}
+
+// Per-frame input: cycle, use skill, hold-to-fire.
+handle_player_actions :: proc(g: ^Game) {
+	for &p, i in g.players {
+		if p.dead do continue
+		if rl.IsKeyPressed(p.cycle_key) do cycle_skill(g, &p)
+		if rl.IsKeyPressed(p.skill_key) do activate_skill(g, &p)
+		if rl.IsKeyDown(p.fire_key) && p.fire_cd <= 0 do fire_gun(g, &p, i32(i))
+	}
+}
+
+// --- Skill dice pickups ---
+
+spawn_skill_pickup :: proc(g: ^Game, pos: [2]f32) {
+	for &pk in g.skill_pickups {
+		if pk.active do continue
+		pk = SkillPickup{
+			pos    = {clamp(pos.x, 30, SCREEN_W - 30), clamp(pos.y, PLAY_MIN_Y + 15, SCREEN_H - 30)},
+			life   = SKILL_PICKUP_LIFETIME,
+			spin   = rand.float32_range(0, 6.28),
+			active = true,
+		}
+		spawn_burst(g, pk.pos, rl.WHITE, 32, 170, 3)
+		return
+	}
+}
+
+// Very rare from any enemy; 25% from a boss on a "10th level".
+roll_skill_drop :: proc(g: ^Game, pos: [2]f32, from_boss: bool) {
+	chance: f32 = SKILL_DROP_CHANCE
+	if from_boss && g.level % SKILL_BOSS_LEVEL_INTERVAL == 0 do chance = SKILL_BOSS_DROP_CHANCE
+	if rand.float32() < chance do spawn_skill_pickup(g, pos + [2]f32{0, 40})
+}
+
+any_skill_pickup :: proc(g: ^Game) -> bool {
+	for pk in g.skill_pickups {
+		if pk.active do return true
+	}
+	return false
+}
+
+// Touching a die rolls a random skill, which becomes the player's taken skill.
+collect_skill_pickups :: proc(g: ^Game) {
+	for &pk in g.skill_pickups {
+		if !pk.active do continue
+
+		collector: ^Player = nil
+		best: f32 = math.F32_MAX
+		for &p in g.players {
+			if p.dead do continue
+			if !rl.CheckCollisionCircleRec(pk.pos, SKILL_PICKUP_RADIUS, player_rect(p)) do continue
+			d := linalg.length(player_center(p) - pk.pos)
+			if d < best {
+				best = d
+				collector = &p
+			}
+		}
+		if collector == nil do continue
+
+		order := SKILLS
+		grant_skill(g, collector, order[rand.int31_max(i32(len(order)))])
+		spawn_burst(g, pk.pos, rl.WHITE, 40, 240, 4)
+		pk.active = false
+	}
+}
+
+update_skill_pickups :: proc(g: ^Game, dt: f32) {
+	// Like enhancements, the timer pauses on the portal screen.
+	for &pk in g.skill_pickups {
+		if !pk.active do continue
+		pk.spin += dt
+		if g.phase != .LevelComplete && g.phase != .Sucking {
+			pk.life -= dt
+			if pk.life <= 0 do pk.active = false
+		}
+	}
+}
+
+DIE_PIPS :: [6]u16{16, 257, 273, 325, 341, 365} // bit n = cell n of a 3x3 grid
+
+// A tumbling die: its faces keep rolling because the skill is decided on pickup.
+draw_skill_pickups :: proc(g: ^Game) {
+	t := g.time
+	for pk in g.skill_pickups {
+		if !pk.active do continue
+		if pk.life < 3 && g.phase != .LevelComplete && g.phase != .Sucking && int(pk.life * 8) % 2 == 0 do continue
+
+		hue := math.mod(t * 120 + pk.spin * 57, 360)
+		col := rl.ColorFromHSV(hue, 0.65, 1.0)
+		pulse := 1.0 + 0.1 * math.sin(t * 6 + pk.spin)
+
+		rl.BeginBlendMode(.ADDITIVE)
+		draw_glow(pk.pos, 34 * pulse, col, 0.5)
+		rl.EndBlendMode()
+
+		rot := t * 1.3 + pk.spin
+		h := 11 * pulse
+		corners := [4][2]f32{{-h, -h}, {h, -h}, {h, h}, {-h, h}}
+		pts: [4][2]f32
+		for c, i in corners do pts[i] = pk.pos + rotate_vec(c, rot)
+		draw_quad_ccw(pts[0], pts[1], pts[2], pts[3], rl.Color{240, 240, 248, 255})
+		for i in 0 ..< 4 do rl.DrawLineEx(pts[i], pts[(i + 1) % 4], 2, col)
+
+		pips := DIE_PIPS
+		face := int(t * 9 + pk.spin * 3) % 6
+		step := h * 0.55
+		for cell in 0 ..< 9 {
+			if pips[face] & (u16(1) << u16(cell)) == 0 do continue
+			local := [2]f32{f32(cell % 3 - 1) * step, f32(cell / 3 - 1) * step}
+			rl.DrawCircleV(pk.pos + rotate_vec(local, rot), h * 0.15, rl.Color{25, 25, 40, 255})
+		}
+	}
+}

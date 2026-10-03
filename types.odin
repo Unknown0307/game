@@ -18,6 +18,23 @@ EnhancementKind :: enum {
 	Damage,    // incoming damage -10% per copy
 }
 
+// Skills are separate from enhancements: found as dice, kept in a wheel.
+SkillKind :: enum {
+	None,
+	Explosion,    // the old repel blast
+	Rocket,       // gun fires rockets (small blast) while this skill is the taken one
+	Invisibility, // invulnerable for 5 s
+	Surprise,     // 40 ticks: everything that touches you is reflected, you take no damage
+}
+
+SKILLS :: [4]SkillKind{.Explosion, .Rocket, .Invisibility, .Surprise}
+
+// What the boss looks like (the whale is the original; the mothership shoots).
+BossSkin :: enum {
+	Whale,
+	Mothership,
+}
+
 AllyKind :: enum {
 	Heal,
 	Barrier,
@@ -26,9 +43,10 @@ AllyKind :: enum {
 EnemyKind :: enum {
 	Normal,
 	Runner, // small and fast, limited turning
-	Big,    // large, slow, hits harder
+	Big,    // large, slow, hits harder; shoots bullets (or a short laser for the laser variant)
 	Sticky, // the slow "bomb": sticks, waits a few ticks, explodes
-	Boss,   // huge, lots of health
+	Minion, // baby whale summoned by the boss (runner-like steering)
+	Boss,   // huge space whale, lots of health, wraps around the screen
 }
 
 FloatKind :: enum {
@@ -37,14 +55,42 @@ FloatKind :: enum {
 	Heal,
 	Shield,
 	Enhancement,
+	Skill,
 	Boss,
 }
 
 GamePhase :: enum {
+	Menu,   // title screen
+	Paused, // pause overlay (resumes into `resume_phase`)
 	Countdown,
 	Playing,
 	LevelComplete,
+	Sucking, // players + screen are pulled into the portal vortex
 	GameOver,
+}
+
+MenuPage :: enum {
+	Root,     // the main / pause list itself
+	Settings,
+	Controls,
+	Confirm,
+}
+
+PendingAction :: enum {
+	Restart,
+	MainMenu,
+	Quit,
+}
+
+ShakeLevel :: enum {
+	Off,
+	Low,
+	Full,
+}
+
+Settings :: struct {
+	shake:    ShakeLevel,
+	show_fps: bool,
 }
 
 Player :: struct {
@@ -56,7 +102,9 @@ Player :: struct {
 	color:         rl.Color,
 	ship:          ShipStyle,
 	up, down, left, right: rl.KeyboardKey,
-	ability_key:   rl.KeyboardKey,
+	fire_key:      rl.KeyboardKey, // hold: shoot (bullets, or rockets with the Rocket skill)
+	skill_key:     rl.KeyboardKey, // use the taken skill
+	cycle_key:     rl.KeyboardKey, // take the next owned skill
 	start_pos:     [2]f32,
 
 	// Run state
@@ -68,11 +116,23 @@ Player :: struct {
 	dead:          bool,
 	coins:         i32,
 	score:         i32,
-	ability_cd:    f32,
+	fire_cd:       i32, // ticks until the gun may fire again
+	skill:         SkillKind,          // the taken skill (None at the start of a run)
+	skills_owned:  [SkillKind]bool,
+	skill_cd:      [SkillKind]i32,     // per-skill cooldown, in ticks
+	invis_ticks:   i32,
+	surprise_ticks: i32,
+	wheel_w:       [SkillKind]f32,     // animated wheel weights (taken skill = biggest)
+	gun_flip:      bool,
+	muzzle_flash:  [2]f32,             // seconds left of the flash on each wing gun
 	visual_timer:  f32,
 	hurt_flash:    f32,
 	angle:         f32,
 	target_angle:  f32,
+	thrust:        f32, // 0..1 smoothed engine power (drives the exhaust flame)
+	shrink:        f32, // 0 = normal size, 1 = vanished (portal transitions)
+	trail:         [PLAYER_TRAIL_LENGTH][2]f32, // recent centre positions, newest first (ship ribbon)
+	trail_n:       int,
 	shield_ticks:  [MAX_SHIELDS]i32,
 	enhancements:  [MAX_ENHANCEMENTS]EnhancementKind,
 	enhancement_count: i32,
@@ -91,10 +151,29 @@ Enemy :: struct {
 	points:   i32,
 	hit_cd:   f32,
 	flash:    f32,
-	heading:  [2]f32, // runner heading
+	heading:  [2]f32, // runner / minion heading
+	angle:    f32,    // facing, for drawing the ship
 	stuck:    bool,   // sticky bomb state
+
+	// Big enemy weapons
+	laser:       bool, // Big variant: fires a short laser instead of bullets
+	gun_ticks:   i32,  // ticks until the next shot is allowed
+	laser_ticks: i32,  // > 0 while the beam is on
+	gun_flip:    bool, // which turret fires next
 	stick_ticks: i32,
 	stick_pos:   [2]f32,
+
+	// Reflected by the Surprise skill: flies away as a missile that only hurts the *other* player
+	reflect_ticks: i32,
+	reflect_vel:   [2]f32,
+	reflect_owner: i32,
+
+	// Boss skin + mothership weapons (gun_ticks doubles as the bullet cooldown)
+	skin:        BossSkin, // minions inherit the skin of the boss that summoned them
+	ray_cd:      i32,
+	ray_charge:  i32,  // > 0 while aiming the raygun
+	ray_ticks:   i32,  // > 0 while the beam is on
+	ray_angle:   f32,  // beam direction, locked when it fires
 
 	// Boss ability state (only used when can_repel is true)
 	can_repel:    bool,
@@ -102,6 +181,24 @@ Enemy :: struct {
 	summon_cd:    f32,
 	charge:       f32, // > 0 while telegraphing the repel wave
 	repel_visual: f32, // > 0 while the repel shockwave is drawn
+	enraged:      bool,
+	dash_cd:      f32,
+	dash_windup:  f32, // > 0 while aiming the lunge
+	dash_t:       f32, // > 0 while lunging
+	dash_dir:     [2]f32,
+}
+
+Bullet :: struct {
+	pos, vel: [2]f32,
+	life:     f32,
+	active:   bool,
+
+	// Player shots / reflected shots
+	from_player: bool,  // fired by a player's gun: hurts enemies, never players
+	rocket:      bool,
+	range_left:  f32,   // player shots end after this much travel
+	reflected:   bool,  // an enemy bullet turned around by Surprise: hurts the *other* player
+	owner:       i32,   // player index (shooter, or the player who reflected it)
 }
 
 Ally :: struct {
@@ -120,6 +217,13 @@ EnhancementPickup :: struct {
 	life:   f32,
 	pulse:  f32,
 	kind:   EnhancementKind,
+	active: bool,
+}
+
+SkillPickup :: struct {
+	pos:    [2]f32,
+	life:   f32,
+	spin:   f32,
 	active: bool,
 }
 
@@ -186,8 +290,10 @@ Game :: struct {
 	players:     [PLAYER_COUNT]Player,
 	enemies:     [MAX_ENEMIES]Enemy,
 	allies:      [MAX_ALLIES]Ally,
+	bullets:     [MAX_BULLETS]Bullet,
 	coins:       [MAX_COINS]Coin,
 	enh_pickups: [MAX_ENH_PICKUPS]EnhancementPickup,
+	skill_pickups: [MAX_SKILL_PICKUPS]SkillPickup,
 	fx:          Fx,
 	shaders:     Shaders,
 
@@ -199,10 +305,21 @@ Game :: struct {
 	survive_time: f32,
 	countdown:    f32,
 	portal_open:  f32,
+	suck_t:       f32, // seconds elapsed in the suck transition
+	spit_t:       f32, // seconds remaining in the spit-out transition
 
 	spawn_timer: f32,
 	coin_timer:  f32,
 	ally_timer:  f32,
 	tick_accum:  f32,
 	boss_warn:   f32,
+
+	// Menus / settings
+	settings:          Settings,
+	menu_page:         MenuPage,
+	menu_cursor:       i32,
+	menu_saved_cursor: i32,
+	pending:           PendingAction,
+	resume_phase:      GamePhase,
+	quit:              bool,
 }

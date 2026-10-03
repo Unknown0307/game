@@ -200,11 +200,13 @@ update_pickups :: proc(g: ^Game, dt: f32) {
 	for &pk in g.enh_pickups {
 		if !pk.active do continue
 		pk.pulse += dt
-		if g.phase != .LevelComplete {
+		if g.phase != .LevelComplete && g.phase != .Sucking {
 			pk.life -= dt
 			if pk.life <= 0 do pk.active = false
 		}
 	}
+
+	update_skill_pickups(g, dt)
 
 	for &a in g.allies {
 		if !a.active do continue

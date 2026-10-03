@@ -7,7 +7,7 @@ import rl "vendor:raylib"
 
 // =============================================================================
 // player.odin - players: construction, movement, health, shields, enhancements,
-// and the repel-blast ability.
+// and invulnerability checks. (Skills + the gun live in skills.odin.)
 // =============================================================================
 
 SHIELD_COLOR :: rl.Color{215, 220, 228, 255}
@@ -22,24 +22,29 @@ make_player :: proc(index: int) -> Player {
 		p.name          = "P1"
 		p.controls_text = "P1: WASD"
 		p.ready_text    = "READY [R]"
-		p.color         = rl.BLUE
+		p.color         = rl.Color{70, 150, 255, 255}
 		p.hud_color     = rl.SKYBLUE
 		p.ship          = .Fighter
 		p.up, p.down, p.left, p.right = .W, .S, .A, .D
-		p.ability_key   = .R
+		p.fire_key      = .F
+		p.skill_key     = .R
+		p.cycle_key     = .E
 		p.start_pos     = {200, 300}
 	case:
 		p.name          = "P2"
 		p.controls_text = "P2: Arrows"
 		p.ready_text    = "READY [/]"
-		p.color         = rl.GREEN
+		p.color         = rl.Color{60, 230, 110, 255}
 		p.hud_color     = rl.LIME
 		p.ship          = .Interceptor
 		p.up, p.down, p.left, p.right = .UP, .DOWN, .LEFT, .RIGHT
-		p.ability_key   = .SLASH
+		p.fire_key      = .PERIOD
+		p.skill_key     = .SLASH
+		p.cycle_key     = .COMMA
 		p.start_pos     = {600, 300}
 	}
 	p.pos = p.start_pos
+	for k in SkillKind do p.wheel_w[k] = 1
 	return p
 }
 
@@ -48,11 +53,17 @@ revive_player :: proc(p: ^Player) {
 	p.dead = false
 	p.tag_count = 0
 	p.shield_ticks = {}
-	p.ability_cd = 0
+	p.skill_cd = {}
+	p.fire_cd = 0
+	p.invis_ticks = 0
+	p.surprise_ticks = 0
 	p.visual_timer = 0
 	p.hurt_flash = 0
 	p.angle = 0
 	p.target_angle = 0
+	p.thrust = 0
+	p.shrink = 0
+	p.trail_n = 0
 }
 
 player_center :: proc(p: Player) -> [2]f32 {
@@ -145,8 +156,8 @@ apply_enhancement :: proc(p: ^Player, kind: EnhancementKind) -> bool {
 	case .Extension:
 		p.size *= 1.05
 	case .Cooldown:
-		// Scale the running cooldown too so the pickup matters immediately.
-		p.ability_cd *= 0.90
+		// Scale the running cooldowns too so the pickup matters immediately.
+		for k in SkillKind do p.skill_cd[k] = i32(f32(p.skill_cd[k]) * 0.90)
 	case .Damage:
 		// Computed dynamically from the stack count in hurt_player.
 	case .None:
@@ -216,6 +227,9 @@ tick_shields :: proc(p: ^Player) {
 hurt_player :: proc(g: ^Game, p: ^Player, amount: i32) {
 	if p.dead || amount <= 0 do return
 
+	// Invisibility and Surprise make the player immune to all damage.
+	if player_invulnerable(p^) do return
+
 	// A barrier consumes the hit before health is touched.
 	if consume_shield(g, p) {
 		p.hurt_flash = 0.12
@@ -235,48 +249,26 @@ hurt_player :: proc(g: ^Game, p: ^Player, amount: i32) {
 		p.tag_count = MAX_TAGS
 		p.dead = true
 		p.shield_ticks = {}
+		p.invis_ticks = 0
+		p.surprise_ticks = 0
 		spawn_burst(g, center, p.color, 60, 320, 4)
 		spawn_burst(g, center, rl.WHITE, 30, 220, 3)
 		add_shake(g, 16)
 	}
 }
 
-// --- Ability: repel blast (kills regular enemies in range, damages bosses) ---
-
-fire_blast :: proc(g: ^Game, p: ^Player) {
-	center := player_center(p^)
-	p.ability_cd = ABILITY_COOLDOWN * ability_cooldown_multiplier(p^)
-	p.visual_timer = BLAST_VISUAL_TIME
-	add_shake(g, 4)
-	spawn_ring(g, center, p.color, 40, 450, 0.3, 3)
-
-	for &e in g.enemies {
-		if !e.active do continue
-		offset := e.pos - center
-		dist := linalg.length(offset)
-		if dist - e.radius >= REPULSION_RADIUS do continue
-
-		if e.kind == .Boss {
-			e.hp -= 1
-			e.flash = 0.15
-			spawn_burst(g, e.pos, rl.WHITE, 14, 260, 3)
-			if e.hp <= 0 {
-				kill_enemy(g, &e, p)
-			} else {
-				if dist > 0.001 do e.pos += offset / dist * 70 // knock-back
-				add_shake(g, 6)
-			}
-		} else {
-			kill_enemy(g, &e, p)
-		}
-	}
-}
-
 // --- Per-frame update ---
 
 update_player_timers :: proc(p: ^Player, dt: f32) {
-	if p.ability_cd > 0 do p.ability_cd = max(0, p.ability_cd - dt)
 	if p.visual_timer > 0 do p.visual_timer = max(0, p.visual_timer - dt)
+	for i in 0 ..< 2 {
+		if p.muzzle_flash[i] > 0 do p.muzzle_flash[i] = max(0, p.muzzle_flash[i] - dt)
+	}
+	// The wheel slices glide toward their target size (taken skill = biggest).
+	for k in SKILLS {
+		target: f32 = SKILL_WHEEL_BIG if p.skill == k else 1.0
+		p.wheel_w[k] += (target - p.wheel_w[k]) * min(1.0, 12.0 * dt)
+	}
 	if p.hurt_flash > 0 do p.hurt_flash = max(0, p.hurt_flash - dt)
 }
 
@@ -312,10 +304,25 @@ wrap_player_position :: proc(p: ^Player) -> bool {
 	return wrapped
 }
 
+// Engine sparks thrown out behind the ship. Each ship has its own colours.
 emit_trail :: proc(g: ^Game, p: ^Player) {
 	c := player_center(p^)
-	jitter := [2]f32{rand.float32_range(-1, 1), rand.float32_range(-1, 1)}
-	spawn_particle(g, c + jitter * 8, jitter * 25, p.color, 0.35, 5)
+	face := [2]f32{math.cos(p.angle), math.sin(p.angle)}
+	side := [2]f32{-face.y, face.x}
+	back := c - face * (p.size.x * 0.5)
+	j := rand_vec2()
+
+	switch p.ship {
+	case .Fighter:
+		cols := [2]rl.Color{{150, 220, 255, 255}, {255, 255, 255, 255}}
+		spawn_particle(g, back + j * 2, -face * rand.float32_range(70, 150) + j * 30, cols[rand.int31_max(2)], 0.38, rand.float32_range(2.5, 4.5))
+	case .Interceptor:
+		// Two nacelle jets, alternating lime and amber.
+		sgn: f32 = 1 if rand.int31_max(2) == 0 else -1
+		pos := back + side * (p.size.y * 0.36 * sgn)
+		col := rl.Color{255, 190, 60, 255} if sgn > 0 else rl.Color{150, 255, 120, 255}
+		spawn_particle(g, pos + j * 1.5, -face * rand.float32_range(50, 120) + j * 25, col, 0.42, rand.float32_range(3.0, 5.0))
+	}
 }
 
 update_player_movement :: proc(g: ^Game, p: ^Player, dt: f32) {
@@ -323,6 +330,7 @@ update_player_movement :: proc(g: ^Game, p: ^Player, dt: f32) {
 	old := p.pos
 
 	dir: [2]f32
+	thrust_target: f32 = 0
 	if rl.IsKeyDown(p.up)    do dir.y -= 1
 	if rl.IsKeyDown(p.down)  do dir.y += 1
 	if rl.IsKeyDown(p.left)  do dir.x -= 1
@@ -331,7 +339,9 @@ update_player_movement :: proc(g: ^Game, p: ^Player, dt: f32) {
 		dir = linalg.normalize(dir)
 		p.target_angle = math.atan2(dir.y, dir.x)
 		p.pos += dir * p.speed * dt
+		thrust_target = 1
 	}
+	p.thrust += (thrust_target - p.thrust) * min(1.0, 9.0 * dt)
 
 	// Boss repel knock-back: an impulse that fades out.
 	if linalg.length(p.knock) > 1 {
@@ -347,5 +357,12 @@ update_player_movement :: proc(g: ^Game, p: ^Player, dt: f32) {
 	// No trail on the frame of a screen wrap (avoids a streak across the arena).
 	if !wrapped && linalg.length(p.pos - old) > 0.01 {
 		emit_trail(g, p)
+	}
+
+	// Ribbon history for the ship art; a screen wrap would draw a streak across the arena.
+	if wrapped {
+		p.trail_n = 0
+	} else {
+		push_trail(p)
 	}
 }

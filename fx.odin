@@ -47,9 +47,27 @@ add_float :: proc(g: ^Game, pos: [2]f32, value: i32, kind: FloatKind) {
 
 update_fx :: proc(g: ^Game, dt: f32) {
 	fx := &g.fx
+
+	// While the black hole is open it drags every spark and speck into the whirl.
+	hole_pull: f32 = 0
+	if g.phase == .Sucking do hole_pull = 1.0
+	if g.phase == .LevelComplete do hole_pull = 0.6 * g.portal_open
+	pc := portal_center()
+
 	for &p in fx.particles {
 		if p.life > 0 {
 			p.life -= dt
+			if hole_pull > 0 {
+				d := pc - p.pos
+				r := max(math.sqrt(d.x * d.x + d.y * d.y), 10)
+				if r < 14 {
+					p.life = 0
+					continue
+				}
+				dir := d / r
+				acc := min(75000.0 / r, 900.0) * hole_pull
+				p.vel += (dir * acc + [2]f32{-dir.y, dir.x} * acc * 0.7) * dt
+			}
 			p.pos += p.vel * dt
 			p.vel *= max(0, 1 - 2.5 * dt)
 		}
@@ -78,4 +96,8 @@ draw_glow :: proc(pos: [2]f32, radius: f32, color: rl.Color, intensity: f32) {
 
 rand_signed :: proc() -> f32 {
 	return rand.float32_range(-1, 1)
+}
+
+rand_vec2 :: proc() -> [2]f32 {
+	return {rand_signed(), rand_signed()}
 }

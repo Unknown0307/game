@@ -13,6 +13,20 @@ rotate_ship_point :: proc(center: [2]f32, local: [2]f32, angle: f32) -> [2]f32 {
 	return center + rotate_vec(local, angle)
 }
 
+// DrawTriangle culls clockwise triangles, so flip the winding when needed.
+draw_tri_ccw :: proc(a, b, c: [2]f32, col: rl.Color) {
+	cross := (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+	if cross > 0 {
+		rl.DrawTriangle(a, c, b, col)
+	} else {
+		rl.DrawTriangle(a, b, c, col)
+	}
+}
+
+shade :: proc(c: rl.Color, k: f32) -> rl.Color {
+	return rl.Color{u8(f32(c.r) * k), u8(f32(c.g) * k), u8(f32(c.b) * k), c.a}
+}
+
 draw_glows :: proc(g: ^Game) {
 	t := g.time
 	rl.BeginBlendMode(.ADDITIVE)
@@ -31,19 +45,25 @@ draw_glows :: proc(g: ^Game) {
 		if !e.active do continue
 		switch e.kind {
 		case .Boss:
-			pulse := 0.5 + 0.5 * math.sin(t * 8)
-			draw_glow(e.pos, e.radius * 2.0 + pulse * 10, rl.Color{255, 60, 200, 255}, 0.45)
+			pulse := 0.5 + 0.5 * math.sin(t * (14 if e.enraged else 8))
+			gcol := rl.Color{255, 60, 200, 255}
+			if e.enraged do gcol = rl.Color{255, 50, 40, 255}
+			draw_glow(e.pos, e.radius * (2.4 if e.enraged else 2.0) + pulse * 10, gcol, 0.55 if e.enraged else 0.45)
 		case .Big:
-			draw_glow(e.pos, e.radius * 1.6, rl.RED, 0.2)
+			gcol := rl.RED
+			if e.laser do gcol = LASER_COLOR
+			draw_glow(e.pos, e.radius * 1.6, gcol, 0.2)
 		case .Sticky:
 			scale: f32 = 1.3
 			if e.stuck do scale = 1.8
 			draw_glow(e.pos, e.radius * scale, rl.Color{255, 80, 210, 255}, 0.28)
+		case .Minion:
+			draw_glow(e.pos, e.radius * 1.8, rl.Color{200, 120, 255, 255}, 0.18)
 		case .Normal, .Runner:
 		}
 	}
 	for p in g.players {
-		if !p.dead do draw_glow(player_center(p), 42, p.color, 0.3)
+		if !p.dead do draw_glow(player_center(p), (42 + 8 * p.thrust) * (1 - p.shrink), p.color, 0.3)
 	}
 
 	rl.EndBlendMode()
@@ -63,69 +83,53 @@ draw_player :: proc(g: ^Game, p: Player) {
 	col := p.color
 	if p.hurt_flash > 0 && int(p.hurt_flash * 30) % 2 == 0 do col = rl.WHITE
 
+	// shrink > 0 while the ship is being swallowed by / thrown out of the black hole.
+	s := 1.0 - clamp(p.shrink, 0, 1)
+	if s <= 0.02 do return
 	center := player_center(p)
-	half_w := p.size.x * 0.5
-	half_h := p.size.y * 0.5
-	ship := g.shaders.ship
 
-	switch p.ship {
-	case .Fighter:
-		// Pointed fighter/jet silhouette.
-		nose     := rotate_ship_point(center, {half_w + 8, 0}, p.angle)
-		wing_top := rotate_ship_point(center, {-half_w * 0.55, -half_h * 0.85}, p.angle)
-		wing_bot := rotate_ship_point(center, {-half_w * 0.55, half_h * 0.85}, p.angle)
-		tail_top := rotate_ship_point(center, {-half_w * 0.9, -half_h * 0.48}, p.angle)
-		tail_bot := rotate_ship_point(center, {-half_w * 0.9, half_h * 0.48}, p.angle)
-
-		set_ship_shader(ship, t, col)
-		rl.BeginShaderMode(ship.shader)
-		rl.DrawTriangle(nose, wing_top, tail_top, col)
-		rl.DrawTriangle(nose, tail_bot, wing_bot, col)
-		rl.DrawTriangle(nose, tail_top, tail_bot, col)
-		rl.EndShaderMode()
-		rl.DrawTriangleLines(nose, wing_top, tail_top, rl.Fade(rl.WHITE, 0.55))
-		rl.DrawTriangleLines(nose, tail_bot, wing_bot, rl.Fade(rl.WHITE, 0.55))
-
-		cockpit := rotate_ship_point(center, {half_w * 0.18, 0}, p.angle)
-		engine  := rotate_ship_point(center, {-half_w * 0.85, 0}, p.angle)
-		rl.DrawCircleV(cockpit, half_h * 0.25, rl.Fade(rl.WHITE, 0.72))
+	// Invisibility: the ship phases in and out (shorter flickers when it is about to end).
+	ghost := p.invis_ticks > 0
+	visible := true
+	if ghost {
+		rate: f32 = 26 if p.invis_ticks > 60 else 48
+		visible = math.sin(t * rate) > -0.3
+	}
+	if visible {
+		switch p.ship {
+		case .Fighter:     draw_ship_dart(g, p, col, s)
+		case .Interceptor: draw_ship_bulwark(g, p, col, s)
+		}
+	}
+	if ghost {
 		rl.BeginBlendMode(.ADDITIVE)
-		rl.DrawCircleV(engine, half_h * (0.28 + 0.06 * (0.5 + 0.5 * math.sin(t * 14))), rl.Fade(rl.SKYBLUE, 0.8))
+		pulse := 0.5 + 0.5 * math.sin(t * 9)
+		draw_glow(center, 30 * s, skill_color(.Invisibility), 0.35 + 0.2 * pulse)
 		rl.EndBlendMode()
+		rl.DrawCircleLines(i32(center.x), i32(center.y), max(p.size.x, p.size.y) * 0.5 * s + 7, rl.Fade(skill_color(.Invisibility), 0.35 + 0.3 * pulse))
+	}
 
-	case .Interceptor:
-		// Broader square-like interceptor with a narrowed nose.
-		front        := rotate_ship_point(center, {half_w + 5, 0}, p.angle)
-		shoulder_top := rotate_ship_point(center, {half_w * 0.25, -half_h}, p.angle)
-		rear_top     := rotate_ship_point(center, {-half_w, -half_h}, p.angle)
-		rear_bot     := rotate_ship_point(center, {-half_w, half_h}, p.angle)
-		shoulder_bot := rotate_ship_point(center, {half_w * 0.25, half_h}, p.angle)
-		nose_top     := rotate_ship_point(center, {half_w * 0.78, -half_h * 0.62}, p.angle)
-		nose_bot     := rotate_ship_point(center, {half_w * 0.78, half_h * 0.62}, p.angle)
-
-		set_ship_shader(ship, t, col)
-		rl.BeginShaderMode(ship.shader)
-		rl.DrawTriangle(front, shoulder_top, nose_top, col)
-		rl.DrawTriangle(front, nose_bot, shoulder_bot, col)
-		rl.DrawTriangle(shoulder_top, rear_top, rear_bot, col)
-		rl.DrawTriangle(shoulder_top, rear_bot, shoulder_bot, col)
-		rl.EndShaderMode()
-		rl.DrawTriangleLines(front, shoulder_top, nose_top, rl.Fade(rl.WHITE, 0.55))
-		rl.DrawTriangleLines(front, nose_bot, shoulder_bot, rl.Fade(rl.WHITE, 0.55))
-
-		cockpit := rotate_ship_point(center, {half_w * 0.15, 0}, p.angle)
-		engine  := rotate_ship_point(center, {-half_w * 0.8, 0}, p.angle)
-		rl.DrawCircleV(cockpit, half_h * 0.24, rl.Fade(rl.WHITE, 0.72))
+	// Surprise: a reflective dome that spins and flares over its 40 ticks.
+	if p.surprise_ticks > 0 {
+		k := f32(p.surprise_ticks) / f32(SURPRISE_DURATION_TICKS)
+		rad := max(p.size.x, p.size.y) * 0.5 * s + 12
+		scol := skill_color(.Surprise)
 		rl.BeginBlendMode(.ADDITIVE)
-		rl.DrawCircleV(engine, half_h * (0.30 + 0.05 * (0.5 + 0.5 * math.sin(t * 12))), rl.Fade(rl.LIME, 0.8))
+		rl.DrawCircleV(center, rad, rl.Fade(scol, 0.10 + 0.14 * k))
+		for i in 0 ..< 6 {
+			a0 := t * 5 + f32(i) * (math.PI / 3)
+			rl.DrawLineEx(center + [2]f32{math.cos(a0), math.sin(a0)} * rad, center + [2]f32{math.cos(a0 + 0.55), math.sin(a0 + 0.55)} * rad, 3, rl.Fade(rl.WHITE, 0.55 + 0.4 * k))
+		}
 		rl.EndBlendMode()
+		rl.DrawCircleLines(i32(center.x), i32(center.y), rad, rl.Fade(scol, 0.7))
 	}
 
 	// Shield shell around the ship.
 	shields := shield_count(p)
 	if shields > 0 {
+		half := max(p.size.x, p.size.y) * 0.5 * s
 		pulse := 0.9 + 0.1 * math.sin(t * 6.0)
-		rl.DrawCircleLines(i32(center.x), i32(center.y), max(half_w, half_h) + 5 + f32(shields) * 2, rl.Fade(SHIELD_COLOR, 0.45 * pulse))
+		rl.DrawCircleLines(i32(center.x), i32(center.y), half + 5 + f32(shields) * 2, rl.Fade(SHIELD_COLOR, 0.45 * pulse))
 	}
 }
 
@@ -175,7 +179,7 @@ draw_enhancement_pickups :: proc(g: ^Game) {
 	for pk in g.enh_pickups {
 		if !pk.active do continue
 		// Blink during the last 3 seconds before it vanishes.
-		if pk.life < 3 && g.phase != .LevelComplete && int(pk.life * 8) % 2 == 0 do continue
+		if pk.life < 3 && g.phase != .LevelComplete && g.phase != .Sucking && int(pk.life * 8) % 2 == 0 do continue
 
 		p := pk.pos
 		pulse := 1.0 + 0.14 * math.sin(t * 6.0 + pk.pulse)
@@ -193,8 +197,37 @@ draw_enhancement_pickups :: proc(g: ^Game) {
 }
 
 draw_boss_extras :: proc(g: ^Game, e: Enemy) {
-	// Health bar
-	draw_bar(i32(e.pos.x) - 40, i32(e.pos.y - e.radius) - 18, 80, 10, f32(e.hp) / f32(e.max_hp), rl.RED)
+	// Health bar (segmented, turns red-hot when enraged)
+	bx := i32(e.pos.x) - 50
+	by := i32(e.pos.y - e.radius) - 20
+	bar_col := rl.RED if !e.enraged else rl.Color{255, 140, 40, 255}
+	draw_bar(bx, by, 100, 10, f32(e.hp) / f32(e.max_hp), bar_col)
+	segs := min(e.max_hp, 20)
+	for i in 1 ..< segs {
+		x := bx + i32(f32(i) / f32(segs) * 100)
+		rl.DrawLine(x, by, x, by + 10, rl.Fade(rl.BLACK, 0.55))
+	}
+	if e.enraged {
+		rl.DrawText("ENRAGED", bx + 50 - rl.MeasureText("ENRAGED", 12) / 2, by - 15, 12, rl.Fade(rl.RED, 0.6 + 0.4 * math.sin(g.time * 14)))
+	}
+
+	// Lunge telegraph: a blinking lane toward the target, then a hot streak.
+	if e.dash_windup > 0 {
+		k := 1.0 - e.dash_windup / BOSS_DASH_WINDUP
+		blink := 0.5 + 0.5 * math.sin(g.time * 40)
+		far := e.pos + e.dash_dir * (BOSS_DASH_SPEED * BOSS_DASH_TIME + e.radius)
+		perp := [2]f32{-e.dash_dir.y, e.dash_dir.x} * e.radius * 0.8
+		rl.BeginBlendMode(.ADDITIVE)
+		draw_tri_ccw(e.pos + perp, e.pos - perp, far, rl.Fade(rl.Color{255, 40, 40, 255}, 0.08 + 0.12 * k * blink))
+		rl.DrawLineEx(e.pos, far, 2, rl.Fade(rl.Color{255, 90, 90, 255}, 0.3 + 0.4 * blink))
+		rl.EndBlendMode()
+	}
+	if e.dash_t > 0 {
+		rl.BeginBlendMode(.ADDITIVE)
+		rl.DrawLineEx(e.pos, e.pos - e.dash_dir * 150, e.radius * 1.2, rl.Fade(rl.Color{255, 60, 120, 255}, 0.28))
+		rl.DrawLineEx(e.pos, e.pos - e.dash_dir * 110, e.radius * 0.5, rl.Fade(rl.WHITE, 0.4))
+		rl.EndBlendMode()
+	}
 
 	if !e.can_repel do return
 
@@ -209,37 +242,15 @@ draw_boss_extras :: proc(g: ^Game, e: Enemy) {
 	}
 }
 
-draw_enemies :: proc(g: ^Game) {
-	for e in g.enemies {
-		if !e.active do continue
-
-		col := e.color
-		if e.flash > 0 do col = rl.WHITE
-		ex, ey := i32(e.pos.x), i32(e.pos.y)
-
-		rl.DrawCircleV(e.pos, e.radius, col)
-		rl.DrawCircleLines(ex, ey, e.radius, rl.Fade(rl.BLACK, 0.5))
-		if e.kind == .Big || e.kind == .Boss {
-			rl.DrawCircleV(e.pos, e.radius * 0.45, rl.Fade(rl.WHITE, 0.15))
-		}
-		if e.kind == .Sticky {
-			if e.stuck {
-				blink := 0.55 + 0.45 * math.sin(f32(e.stick_ticks) * 5.0)
-				rl.DrawCircleLines(ex, ey, STICKY_EXPLOSION_RADIUS, rl.Fade(rl.Color{255, 90, 210, 255}, 0.35 + 0.25 * blink))
-				rl.DrawText(fmt.ctprintf("%d", e.stick_ticks), ex - 4, ey - 6, 12, rl.WHITE)
-			} else {
-				rl.DrawCircleLines(ex, ey, e.radius + 5, rl.Fade(rl.Color{255, 210, 100, 255}, 0.65))
-			}
-		}
-		if e.kind == .Boss do draw_boss_extras(g, e)
-	}
-}
-
 draw_entities :: proc(g: ^Game) {
 	draw_coins(g)
 	draw_allies(g)
 	draw_enhancement_pickups(g)
 	draw_enemies(g)
+	draw_lasers(g)
+	draw_rayguns(g)
+	draw_skill_pickups(g)
+	draw_bullets(g)
 	for p in g.players do draw_player(g, p)
 }
 
@@ -279,6 +290,10 @@ draw_floaters :: proc(g: ^Game) {
 			text = fmt.ctprintf("ENH %d/%d", f.value, MAX_ENHANCEMENTS)
 			color = rl.SKYBLUE
 			size = 15
+		case .Skill:
+			text = skill_name(SkillKind(f.value))
+			color = skill_color(SkillKind(f.value))
+			size = 17
 		case .Boss:
 			text = fmt.ctprintf("+%d!", f.value)
 			color = rl.GOLD
@@ -309,13 +324,13 @@ draw_shockwaves :: proc(g: ^Game, shake_off: [2]f32) {
 
 // Renders one complete frame of the game onto the fixed logical canvas.
 render_world :: proc(g: ^Game) {
-	rl.ClearBackground(g.style.background)
-	draw_procedural_background(g.style, g.level, g.time)
+	hs := hole_state(g)
+	draw_space_background(g, hs)
 
-	shake_off := [2]f32{rand_signed(), rand_signed()} * g.fx.shake
+	shake_off := [2]f32{rand_signed(), rand_signed()} * g.fx.shake * shake_scale(g.settings)
 	camera := rl.Camera2D{offset = shake_off, zoom = 1.0}
 	rl.BeginMode2D(camera)
-	draw_grid(g.style, g.time)
+	draw_black_hole(g, hs, shake_off)
 	draw_glows(g)
 	draw_entities(g)
 	draw_particles(g)

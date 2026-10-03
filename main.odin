@@ -10,15 +10,20 @@ import rl "vendor:raylib"
 //   types.odin       data structures (Game owns all state)
 //   difficulty.odin  level number -> linear difficulty parameters
 //   game.odin        lifecycle, phases, level progression, update loop
-//   player.odin      players, shields, enhancements, blast ability
+//   player.odin      players, shields, enhancements, damage
+//   skills.odin      skills (explosion, rocket, invisibility, surprise), the gun, skill dice
 //   enemy.odin       enemy creation, steering, collisions, kills
-//   boss.odin        boss spawning, repel + summon behaviour
+//   enemy_art.odin   how every enemy looks (ships, rockets, space whales)
+//   ship_art.odin    how the two player ships look (P1 dart, P2 twin-boom gunship)
+//   gunfire.odin     enemy bullets, lasers, mothership raygun, all bullet flight
+//   boss.odin        boss spawning (whale or mothership), repel + summon behaviour
 //   pickups.odin     coins, allies, enhancement drops
 //   fx.odin          particles, floating text, shake
 //   shaders.odin     GLSL + loaders
-//   style.odin       procedural level look, portal
+//   style.odin       level palette, starfield backdrop, black hole
 //   render.odin      world drawing
-//   hud.odin         HUD and menu screens
+//   hud.odin         HUD and phase screens
+//   menu.odin        main menu, pause, settings, controls, confirm dialogs
 // =============================================================================
 
 main :: proc() {
@@ -27,6 +32,7 @@ main :: proc() {
 	rl.MaximizeWindow()
 	defer rl.CloseWindow()
 	rl.SetTargetFPS(60)
+	rl.SetExitKey(.KEY_NULL) // Esc opens the pause menu instead of closing the window
 
 	// Gameplay and HUD use a fixed 800x600 logical canvas, stretched to the window.
 	canvas := rl.LoadRenderTexture(SCREEN_W, SCREEN_H)
@@ -39,7 +45,7 @@ main :: proc() {
 	game_init(g)
 	defer game_shutdown(g)
 
-	for !rl.WindowShouldClose() {
+	for !rl.WindowShouldClose() && !g.quit {
 		dt := min(rl.GetFrameTime(), 0.05)
 		g.time = f32(rl.GetTime())
 

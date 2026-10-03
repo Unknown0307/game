@@ -49,12 +49,23 @@ make_enemy :: proc(kind: EnemyKind, lp: LevelParams) -> Enemy {
 		e.damage = 2
 		if e.radius >= 27.0 do e.damage = 3
 		e.points = i32(e.radius * 1.5)
+		e.gun_ticks = BIG_SHOOT_COOLDOWN_TICKS + rand.int31_max(21) // don't open fire the instant it spawns
+		e.gun_flip  = rand.int31_max(2) == 0
+		if rand.float32() < BIG_LASER_CHANCE {
+			e.laser = true
+			e.color = rl.Color{35, 140, 190, 255}
+		}
 	case .Sticky:
 		e.radius = 10.0
 		e.speed  = rand.float32_range(42.0, 62.0) * mult
 		e.color  = rl.Color{255, 80, 210, 255}
 		e.damage = STICKY_EXPLOSION_DAMAGE
 		e.points = 25
+	case .Minion:
+		e.radius = 10.0
+		e.speed  = rand.float32_range(140.0, 195.0) * mult
+		e.color  = rl.Color{210, 130, 255, 255}
+		e.points = 12
 	case .Boss:
 		e.radius = BOSS_RADIUS
 		e.speed  = min(BOSS_BASE_SPEED * mult, PLAYER_MAX_SPEED * BOSS_SPEED_CAP)
@@ -66,6 +77,7 @@ make_enemy :: proc(kind: EnemyKind, lp: LevelParams) -> Enemy {
 		e.can_repel = lp.boss_has_ability
 		e.repel_cd  = BOSS_FIRST_REPEL_DELAY
 		e.summon_cd = BOSS_FIRST_SUMMON_DELAY
+		e.dash_cd   = BOSS_DASH_FIRST_DELAY
 	}
 	return e
 }
@@ -99,30 +111,86 @@ spawn_enemy_at_edge :: proc(g: ^Game, kind: EnemyKind) -> ^Enemy {
 	e := spawn_enemy_at(g, kind, {})
 	if e == nil do return nil
 	e.pos = edge_spawn_position(e.radius)
+	e.angle = math.atan2(f32(SCREEN_H) * 0.5 - e.pos.y, f32(SCREEN_W) * 0.5 - e.pos.x) // face the arena
 	return e
 }
 
 // --- Targeting & movement ---
 
+// Shortest vector from `from` to `to` when the screen wraps around (the boss
+// takes shortcuts through the borders just like the players do).
+wrap_delta :: proc(from, to: [2]f32) -> [2]f32 {
+	d := to - from
+	sw := f32(SCREEN_W)
+	sh := f32(SCREEN_H)
+	if d.x > sw * 0.5 {
+		d.x -= sw
+	} else if d.x < -sw * 0.5 {
+		d.x += sw
+	}
+	if d.y > sh * 0.5 {
+		d.y -= sh
+	} else if d.y < -sh * 0.5 {
+		d.y += sh
+	}
+	return d
+}
+
 // Nearest living player OR ally (enemies go after allies too).
-nearest_target :: proc(g: ^Game, from: [2]f32) -> (target: [2]f32, dist: f32, found: bool) {
+nearest_target :: proc(g: ^Game, from: [2]f32, wrap := false) -> (target: [2]f32, dist: f32, found: bool) {
 	dist = math.F32_MAX
 	for p in g.players {
 		if p.dead do continue
 		c := player_center(p)
-		d := linalg.length(c - from)
+		d := linalg.length(wrap_delta(from, c) if wrap else c - from)
 		if d < dist {
 			dist, target, found = d, c, true
 		}
 	}
 	for a in g.allies {
 		if !a.active do continue
-		d := linalg.length(a.pos - from)
+		d := linalg.length(wrap_delta(from, a.pos) if wrap else a.pos - from)
 		if d < dist {
 			dist, target, found = d, a.pos, true
 		}
 	}
 	return
+}
+
+// Bosses wrap around the screen, so they exist at up to 9 positions. This returns
+// the copy of the boss position closest to `point` (other enemies: just pos).
+closest_wrapped_pos :: proc(e: Enemy, point: [2]f32) -> [2]f32 {
+	if e.kind != .Boss do return e.pos
+	best := e.pos
+	best_d := linalg.length(e.pos - point)
+	for ox in ([3]f32{0, SCREEN_W, -SCREEN_W}) {
+		for oy in ([3]f32{0, SCREEN_H, -SCREEN_H}) {
+			c := e.pos + [2]f32{ox, oy}
+			d := linalg.length(c - point)
+			if d < best_d {
+				best, best_d = c, d
+			}
+		}
+	}
+	return best
+}
+
+// Seamless screen wrap for the boss: crossing an edge re-enters on the other side.
+wrap_boss :: proc(e: ^Enemy) -> bool {
+	sw := f32(SCREEN_W)
+	sh := f32(SCREEN_H)
+	before := e.pos
+	if e.pos.x < 0 {
+		e.pos.x += sw
+	} else if e.pos.x > sw {
+		e.pos.x -= sw
+	}
+	if e.pos.y < 0 {
+		e.pos.y += sh
+	} else if e.pos.y > sh {
+		e.pos.y -= sh
+	}
+	return e.pos != before
 }
 
 nearest_player :: proc(g: ^Game, from: [2]f32) -> (target: [2]f32, dist: f32, found: bool) {
@@ -163,16 +231,36 @@ steer_runner :: proc(e: ^Enemy, dir: [2]f32, dt: f32, lp: LevelParams) {
 	}
 }
 
-move_enemy :: proc(g: ^Game, e: ^Enemy, dt: f32) {
-	target, dist, found := nearest_target(g, e.pos)
-	if !found || dist <= 0.001 do return
+turn_toward :: proc(cur, want, max_step: f32) -> f32 {
+	d := want - cur
+	for d > math.PI  do d -= 2 * math.PI
+	for d < -math.PI do d += 2 * math.PI
+	return cur + clamp(d, -max_step, max_step)
+}
 
-	dir := (target - e.pos) / dist
-	if e.kind == .Runner {
+move_enemy :: proc(g: ^Game, e: ^Enemy, dt: f32) {
+	wrap := e.kind == .Boss
+	target, _, found := nearest_target(g, e.pos, wrap)
+	if !found do return
+
+	delta := target - e.pos
+	if wrap do delta = wrap_delta(e.pos, target)
+	dist := linalg.length(delta)
+	if dist <= 0.001 do return
+	dir := delta / dist
+	want := math.atan2(dir.y, dir.x)
+
+	switch e.kind {
+	case .Runner, .Minion:
 		steer_runner(e, dir, dt, g.params)
 		e.pos += e.heading * e.speed * dt
-	} else {
+		e.angle = math.atan2(e.heading.y, e.heading.x)
+	case .Boss:
 		e.pos += dir * e.speed * dt
+		e.angle = turn_toward(e.angle, want, 1.8 * dt) // a whale turns slowly
+	case .Normal, .Big, .Sticky:
+		e.pos += dir * e.speed * dt
+		e.angle = turn_toward(e.angle, want, 8.0 * dt)
 	}
 }
 
@@ -183,12 +271,14 @@ outside_play_area :: proc(pos: [2]f32, margin: f32) -> bool {
 emit_enemy_trail :: proc(g: ^Game, e: Enemy) {
 	switch e.kind {
 	case .Runner:
-		if rand.float32() < 0.5 do spawn_particle(g, e.pos, {0, 0}, rl.ORANGE, 0.3, 4)
+		if rand.float32() < 0.5 do spawn_particle(g, epoint(e.pos, e.angle, e.radius, -1.4, 0), {0, 0}, rl.ORANGE, 0.3, 4)
+	case .Minion:
+		if rand.float32() < 0.4 do spawn_particle(g, epoint(e.pos, e.angle, e.radius, -1.3, 0), {0, 0}, e.color, 0.35, 3)
 	case .Sticky:
 		spawn_particle(g, e.pos, {0, 0}, rl.Color{255, 80, 210, 255}, 0.4, 3)
 	case .Boss:
 		jitter := [2]f32{rand.float32_range(-1, 1), rand.float32_range(-1, 1)}
-		spawn_particle(g, e.pos + jitter * (e.radius * 0.6), jitter * 40, rl.Color{255, 90, 200, 255}, 0.5, 6)
+		spawn_particle(g, e.pos + jitter * (e.radius * 0.6), jitter * 40, rl.Color{255, 60, 60, 255} if e.enraged else rl.Color{255, 90, 200, 255}, 0.5, 6)
 	case .Normal, .Big:
 	}
 }
@@ -204,15 +294,30 @@ update_enemies :: proc(g: ^Game, dt: f32) {
 			continue
 		}
 
+		// Reflected by Surprise: a straight-line missile until the effect runs out.
+		if e.reflect_ticks > 0 {
+			move_reflected_enemy(g, &e, dt)
+			continue
+		}
+
 		hold := false
 		if e.kind == .Boss do hold = update_boss_ai(g, &e, dt)
 		if !hold do move_enemy(g, &e, dt)
+
+		if e.kind == .Boss {
+			before := e.pos
+			if wrap_boss(&e) {
+				// Warp flash on both sides of the border.
+				spawn_burst(g, before, BOSS_PURPLE, 14, 200, 3)
+				spawn_burst(g, e.pos, BOSS_PURPLE, 14, 200, 3)
+			}
+		}
 
 		emit_enemy_trail(g, e)
 
 		// A runner that missed and flew far off-screen would otherwise live forever
 		// and slowly fill the enemy pool.
-		if e.kind == .Runner && outside_play_area(e.pos, RUNNER_CULL_MARGIN) {
+		if (e.kind == .Runner || e.kind == .Minion) && outside_play_area(e.pos, RUNNER_CULL_MARGIN) {
 			e.active = false
 		}
 	}
@@ -238,9 +343,11 @@ kill_enemy :: proc(g: ^Game, e: ^Enemy, killer: ^Player) {
 			spawn_coin_at(g, e.pos + [2]f32{rand.float32_range(-50, 50), rand.float32_range(-50, 50)})
 		}
 		roll_enhancement_drop(g, e.pos, true)
+		roll_skill_drop(g, e.pos, true)
 	} else {
 		if rand.float32() < COIN_DROP_CHANCE do spawn_coin_at(g, e.pos)
 		roll_enhancement_drop(g, e.pos, false)
+		roll_skill_drop(g, e.pos, false)
 	}
 }
 
@@ -268,22 +375,40 @@ update_sticky_ticks :: proc(g: ^Game) {
 	}
 }
 
-enemy_hits_player :: proc(g: ^Game, p: ^Player) {
-	if p.dead do return
+enemy_hits_player :: proc(g: ^Game, p: ^Player, index: i32) {
+	if p.dead || p.invis_ticks > 0 do return // invisible: everything passes through
 	rect := player_rect(p^)
 
 	for &e in g.enemies {
 		if !e.active do continue
 		if e.kind == .Sticky && e.stuck do continue
-		if !rl.CheckCollisionCircleRec(e.pos, e.radius, rect) do continue
+		if e.reflect_ticks > 0 && e.reflect_owner == index do continue // never hurts who reflected it
+		epos := closest_wrapped_pos(e, player_center(p^))
+		if !rl.CheckCollisionCircleRec(epos, e.radius, rect) do continue
+
+		// Surprise: whatever touches the player is thrown back, no damage taken.
+		if p.surprise_ticks > 0 {
+			reflect_enemy(g, &e, p, index, epos)
+			continue
+		}
+
+		// A reflected missile hitting the *other* player.
+		if e.reflect_ticks > 0 {
+			e.active = false
+			hurt_player(g, p, e.damage)
+			spawn_burst(g, e.pos, e.color, 8, 150, 3)
+			if p.dead do return
+			continue
+		}
 
 		switch e.kind {
 		case .Boss:
 			// The boss isn't consumed: it hurts, then gets knocked back.
 			if e.hit_cd <= 0 {
 				e.hit_cd = BOSS_HIT_COOLDOWN
+				e.dash_t = 0
 				hurt_player(g, p, e.damage)
-				offset := e.pos - player_center(p^)
+				offset := epos - player_center(p^)
 				dist := linalg.length(offset)
 				if dist > 0.001 do e.pos += offset / dist * 120
 			}
@@ -294,7 +419,7 @@ enemy_hits_player :: proc(g: ^Game, p: ^Player) {
 			e.stick_pos = e.pos
 			e.flash = 0.35
 			spawn_burst(g, e.pos, rl.Color{255, 220, 90, 255}, 18, 130, 3)
-		case .Normal, .Runner, .Big:
+		case .Normal, .Runner, .Big, .Minion:
 			e.active = false
 			hurt_player(g, p, e.damage)
 			spawn_burst(g, e.pos, e.color, 8, 150, 3)
@@ -310,7 +435,7 @@ enemies_hit_allies :: proc(g: ^Game) {
 		if !e.active do continue
 		for &a in g.allies {
 			if !a.active do continue
-			if !rl.CheckCollisionCircles(e.pos, e.radius, a.pos, a.radius) do continue
+			if !rl.CheckCollisionCircles(closest_wrapped_pos(e, a.pos), e.radius, a.pos, a.radius) do continue
 
 			if e.kind == .Boss {
 				a.hp = 0
