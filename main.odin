@@ -19,11 +19,11 @@ MAX_FLOATS :: 32
 REPULSION_RADIUS :: 180.0
 ABILITY_COOLDOWN :: 2.0
 // Enemy pacing is intentionally gentler than the original build.
-// Every enemy also gets an absolute speed cap equal to the player's base speed.
 ENEMY_SPEED_MULT :: 0.70
 LEVEL_SPEED_STEP :: 0.05
 PLAYER_MAX_SPEED: f32 = 300.0
-RUNNER_TURN_RATE: f32 = 2.7 // radians/second; limits runner curvature
+RUNNER_TURN_RATE: f32 = 0.85 // radians/second; intentionally gentle steering
+RUNNER_MAX_CURVE_ANGLE: f32 = 0.38 // radians (~22 degrees) from the current heading
 LEVEL_SCORE_STEP :: 1000 // every 1000 total score starts the next level
 LEVEL_COUNTDOWN :: 10.0
 PORTAL_OPEN_TIME :: 1.25
@@ -384,6 +384,12 @@ draw_centered :: proc(text: cstring, y, size: i32, color: rl.Color) {
 	rl.DrawText(text, SCREEN_W / 2 - w / 2, y, size, color)
 }
 
+draw_centered_at :: proc(text: cstring, center_x, y, font_size: i32, color: rl.Color) {
+	x := center_x - rl.MeasureText(text, font_size) / 2
+	rl.DrawText(text, x, y, font_size, color)
+}
+
+
 // --- Spawning ---
 spawn_coin_at :: proc(pos: [2]f32) {
 	for &c in coins {
@@ -500,9 +506,6 @@ spawn_enemy :: proc(kind: EnemyKind, level_speed_mult: f32) {
 			e.damage = BOSS_DAMAGE
 			e.points = BOSS_SCORE
 		}
-
-		// No enemy can move faster than the player.
-		e.speed = min(e.speed, PLAYER_MAX_SPEED)
 
 		pad := e.radius + 10
 		switch rand.int31_max(4) {
@@ -1119,6 +1122,56 @@ all_surviving_players_in_portal :: proc(p1, p2: Player) -> bool {
 	return alive > 0 && inside == alive
 }
 
+wrap_player_position :: proc(p: ^Player) -> bool {
+	wrapped := false
+	sw := f32(SCREEN_W)
+	sh := f32(SCREEN_H)
+
+	// Wait until the whole ship has crossed an edge, then place it just
+	// outside the opposite edge so it naturally slides back into view.
+	if p.pos.x + p.size.x < 0 {
+		p.pos.x = sw
+		wrapped = true
+	} else if p.pos.x > sw {
+		p.pos.x = -p.size.x
+		wrapped = true
+	}
+
+	if p.pos.y + p.size.y < 0 {
+		p.pos.y = sh
+		wrapped = true
+	} else if p.pos.y > sh {
+		p.pos.y = -p.size.y
+		wrapped = true
+	}
+
+	return wrapped
+}
+
+reset_player_for_new_run :: proc(p: ^Player, start_pos: [2]f32) {
+	p.pos = start_pos
+	p.size = {30, 30}
+	p.speed = PLAYER_MAX_SPEED
+	p.kill_count = 0
+	p.tag_count = 0
+	p.dead = false
+	p.coins = 0
+	p.score = 0
+	p.ability_cd = 0
+	p.visual_timer = 0
+	p.hurt_flash = 0
+	p.angle = 0
+	p.target_angle = 0
+	p.enhancement_count = 0
+
+	for i in 0 ..< MAX_SHIELDS {
+		p.shield_ticks[i] = 0
+	}
+	for i in 0 ..< MAX_ENHANCEMENTS {
+		p.enhancements[i] = .None
+	}
+}
+
 reset_level_world :: proc() {
 	for &e in enemies do e.active = false
 	for &c in coins do c.active = false
@@ -1237,17 +1290,25 @@ collect_enhancement :: proc(p1, p2: ^Player) {
 }
 
 draw_enhancement_slots :: proc(p: Player, x, y: i32, right_align: bool) {
-	draw_x := x
 	label := fmt.ctprintf("ENH %d/%d", p.enhancement_count, MAX_ENHANCEMENTS)
+	slot_w: i32 = 28
+	slot_gap: i32 = 4
+	slots_width := MAX_ENHANCEMENTS * slot_w + (MAX_ENHANCEMENTS - 1) * slot_gap
+
+	label_x := x
+		slots_x := x
 	if right_align {
-		draw_x -= rl.MeasureText(label, 13) + 8
+		label_x = x - rl.MeasureText(label, 13)
+		slots_x = x - slots_width
 	}
-	rl.DrawText(label, draw_x, y, 13, rl.Fade(rl.LIGHTGRAY, 0.85))
+
+	rl.DrawText(label, label_x, y, 13, rl.Fade(rl.LIGHTGRAY, 0.85))
 	slot_y := y + 16
 	for i in 0 ..< MAX_ENHANCEMENTS {
-		sx := draw_x + i32(i) * 32
-		rl.DrawRectangleLines(sx, slot_y, 28, 24, rl.Fade(rl.WHITE, 0.35))
-		if i32(i) >= p.enhancement_count {
+		ii := i32(i)
+		sx := slots_x + ii * (slot_w + slot_gap)
+		rl.DrawRectangleLines(sx, slot_y, slot_w, 24, rl.Fade(rl.WHITE, 0.35))
+		if ii >= p.enhancement_count {
 			continue
 		}
 		col := rl.SKYBLUE
@@ -1264,8 +1325,8 @@ draw_enhancement_slots :: proc(p: Player, x, y: i32, right_align: bool) {
 			label2 = "DMG"
 		case .None:
 		}
-		rl.DrawRectangle(sx + 2, slot_y + 2, 24, 20, rl.Fade(col, 0.32))
-		rl.DrawText(label2, sx + 4, slot_y + 7, 10, rl.WHITE)
+		rl.DrawRectangle(sx + 2, slot_y + 2, slot_w - 4, 20, rl.Fade(col, 0.32))
+		rl.DrawText(label2, sx + (slot_w - rl.MeasureText(label2, 10)) / 2, slot_y + 7, 10, rl.WHITE)
 	}
 }
 
@@ -1610,15 +1671,18 @@ main :: proc() {
 	screenWidth: i32 = SCREEN_W
 	screenHeight: i32 = SCREEN_H
 
+	rl.SetConfigFlags(rl.ConfigFlags{.WINDOW_RESIZABLE})
 	rl.InitWindow(screenWidth, screenHeight, "Odin + Raylib: 2 Player Survival")
+	rl.MaximizeWindow()
 	defer rl.CloseWindow()
 
 	rl.SetTargetFPS(60)
 
-	// Keep the game world at a stable 800x600 logical resolution, then scale it
-	// into the actual window/fullscreen display with letterboxing. This keeps the
-	// HUD, collision bounds, and gameplay proportions consistent at every size.
+	// Keep gameplay and HUD coordinates on a stable 800x600 logical canvas.
+	// The complete canvas is stretched into the current window/fullscreen size,
+	// so the HUD positions remain deterministic at every window size.
 	game_target := rl.LoadRenderTexture(SCREEN_W, SCREEN_H)
+	rl.SetTextureFilter(game_target.texture, .BILINEAR)
 	defer rl.UnloadRenderTexture(game_target)
 
 	blast := load_blast_shader()
@@ -1716,7 +1780,25 @@ main :: proc() {
 		case .Playing:
 			survive_time += dt
 		case .GameOver:
-			// No gameplay updates while the final screen is shown.
+			// Hold the final score screen until Space restarts the entire run.
+			if rl.IsKeyPressed(.SPACE) {
+				reset_level_world()
+				reset_player_for_new_run(&player1, {200, 300})
+				reset_player_for_new_run(&player2, {600, 300})
+
+				spawn_timer = 0
+				coin_timer = 1
+				ally_timer = 6
+				tick_accum = 0
+				ticks = 0
+				boss_warn = 0
+				survive_time = 0
+				level = 1
+				countdown = LEVEL_COUNTDOWN
+				portal_timer = 0
+				portal_open = 0
+				phase = .Countdown
+			}
 		}
 
 		// Update Cooldowns & Timers during active gameplay/countdown.
@@ -1730,6 +1812,8 @@ main :: proc() {
 
 		old1 := player1.pos
 		old2 := player2.pos
+		wrapped1 := false
+		wrapped2 := false
 
 		// Players can move during preparation, combat, and the portal transition.
 		if phase == .Countdown || phase == .Playing || phase == .LevelComplete {
@@ -1764,14 +1848,18 @@ main :: proc() {
 		update_ship_rotation(&player1, dt)
 		update_ship_rotation(&player2, dt)
 
-		// Keep players inside the logical 800x600 game canvas.
-		player1.pos = linalg.clamp(player1.pos, [2]f32{0, 0}, [2]f32{f32(SCREEN_W) - player1.size.x, f32(SCREEN_H) - player1.size.y})
-		player2.pos = linalg.clamp(player2.pos, [2]f32{0, 0}, [2]f32{f32(SCREEN_W) - player2.size.x, f32(SCREEN_H) - player2.size.y})
+		// Screen-wrap instead of clamping. The ship must fully leave an edge
+		// before it is placed just outside the opposite edge.
+		if phase == .Countdown || phase == .Playing || phase == .LevelComplete {
+			if !player1.dead do wrapped1 = wrap_player_position(&player1)
+			if !player2.dead do wrapped2 = wrap_player_position(&player2)
+		}
 
-		// Movement trails
+		// Movement trails. Suppress a trail on the frame of a screen wrap so
+		// the teleport does not draw a giant streak across the arena.
 		if (phase == .Countdown || phase == .Playing || phase == .LevelComplete) {
-			if !player1.dead && linalg.length(player1.pos - old1) > 0.01 do emit_trail(&player1)
-			if !player2.dead && linalg.length(player2.pos - old2) > 0.01 do emit_trail(&player2)
+			if !player1.dead && !wrapped1 && linalg.length(player1.pos - old1) > 0.01 do emit_trail(&player1)
+			if !player2.dead && !wrapped2 && linalg.length(player2.pos - old2) > 0.01 do emit_trail(&player2)
 		}
 
 		p1_center := player1.pos + (player1.size * 0.5)
@@ -1896,18 +1984,24 @@ main :: proc() {
 							delta := desired_angle - current_angle
 							if delta > math.PI do delta -= 2 * math.PI
 							if delta < -math.PI do delta += 2 * math.PI
-							turn := clamp(delta, -RUNNER_TURN_RATE * dt, RUNNER_TURN_RATE * dt)
-							cs := math.cos(turn)
-							sn := math.sin(turn)
-							e.heading = {
-								e.heading.x * cs - e.heading.y * sn,
-							e.heading.x * sn + e.heading.y * cs,
+
+							// Runner steering is deliberately one-directional. It may curve
+							// only while the target is inside a narrow forward cone. If the
+							// target is behind it, the runner does NOT turn around.
+							if abs(delta) <= RUNNER_MAX_CURVE_ANGLE {
+								turn := clamp(delta, -RUNNER_TURN_RATE * dt, RUNNER_TURN_RATE * dt)
+								cs := math.cos(turn)
+								sn := math.sin(turn)
+								e.heading = {
+									e.heading.x * cs - e.heading.y * sn,
+									e.heading.x * sn + e.heading.y * cs,
+								}
+							}
 						}
-						}
-						move_speed := min(e.speed, PLAYER_MAX_SPEED)
+						move_speed := e.speed
 						e.pos += e.heading * move_speed * dt
 					} else {
-						move_speed := min(e.speed, PLAYER_MAX_SPEED)
+						move_speed := e.speed
 						e.pos += direction * move_speed * dt
 					}
 				}
@@ -2037,38 +2131,40 @@ main :: proc() {
 
 		// Game over: final score screen once both players are dead.
 		if phase == .GameOver {
-			rl.DrawRectangle(0, 0, SCREEN_W, SCREEN_H, rl.Fade(rl.BLACK, 0.65))
-			draw_centered("GAME OVER", 130, 56, rl.RED)
-			draw_centered(fmt.ctprintf("TOTAL SCORE: %d", player1.score + player2.score), 205, 34, rl.GOLD)
-			draw_centered(fmt.ctprintf("P1   Score %d  |  Kills %d  |  Coins %d", player1.score, player1.kill_count, player1.coins), 270, 22, rl.SKYBLUE)
-			draw_centered(fmt.ctprintf("P2   Score %d  |  Kills %d  |  Coins %d", player2.score, player2.kill_count, player2.coins), 305, 22, rl.LIME)
-			draw_centered(fmt.ctprintf("Reached Level %d", level), 345, 22, rl.WHITE)
+			rl.DrawRectangle(0, 0, SCREEN_W, SCREEN_H, rl.Fade(rl.BLACK, 0.70))
+			draw_centered("GAME OVER", 105, 56, rl.RED)
+			draw_centered(fmt.ctprintf("TOTAL SCORE  %d", player1.score + player2.score), 175, 30, rl.GOLD)
 
-			winner: cstring = "IT'S A TIE"
-			if player1.score > player2.score {
-				winner = "P1 WINS"
-			} else if player2.score > player1.score {
-				winner = "P2 WINS"
-			}
-			draw_centered(winner, 390, 30, rl.WHITE)
-			draw_centered(fmt.ctprintf("Survived %.0f seconds", survive_time), 435, 20, rl.LIGHTGRAY)
+			// Show each player's result directly. No winner/loser label.
+			p1_box := rl.Rectangle{90, 235, 290, 105}
+			p2_box := rl.Rectangle{420, 235, 290, 105}
+			rl.DrawRectangleLinesEx(p1_box, 2, rl.Fade(rl.SKYBLUE, 0.60))
+			rl.DrawRectangleLinesEx(p2_box, 2, rl.Fade(rl.LIME, 0.60))
+
+			draw_centered_at("PLAYER 1", 235, 250, 20, rl.SKYBLUE)
+			draw_centered_at(fmt.ctprintf("Score: %d", player1.score), 235, 277, 24, rl.WHITE)
+			draw_centered_at(fmt.ctprintf("Kills: %d   Coins: %d", player1.kill_count, player1.coins), 235, 310, 17, rl.LIGHTGRAY)
+
+			draw_centered_at("PLAYER 2", 565, 250, 20, rl.LIME)
+			draw_centered_at(fmt.ctprintf("Score: %d", player2.score), 565, 277, 24, rl.WHITE)
+			draw_centered_at(fmt.ctprintf("Kills: %d   Coins: %d", player2.kill_count, player2.coins), 565, 310, 17, rl.LIGHTGRAY)
+
+			draw_centered(fmt.ctprintf("Reached Level %d  |  Survived %.0f seconds", level, survive_time), 385, 18, rl.LIGHTGRAY)
+			draw_centered("PRESS SPACE TO RESTART", 455, 28, rl.WHITE)
 		}
 
 		rl.EndTextureMode()
 
 		// --- PRESENT LOGICAL CANVAS TO THE ACTUAL DISPLAY ---
+		// Stretch the complete logical canvas to the current client area. This
+		// intentionally does NOT preserve the 4:3 aspect ratio, because the user
+		// wants fullscreen and resized windows to use every available pixel.
 		rl.ClearBackground(rl.BLACK)
 
 		display_w := f32(rl.GetScreenWidth())
 		display_h := f32(rl.GetScreenHeight())
-		scale := min(display_w / f32(SCREEN_W), display_h / f32(SCREEN_H))
-		dest_w := f32(SCREEN_W) * scale
-		dest_h := f32(SCREEN_H) * scale
-		dest_x := (display_w - dest_w) * 0.5
-		dest_y := (display_h - dest_h) * 0.5
-
 		source := rl.Rectangle{0, 0, f32(SCREEN_W), -f32(SCREEN_H)}
-		dest := rl.Rectangle{dest_x, dest_y, dest_w, dest_h}
+		dest := rl.Rectangle{0, 0, display_w, display_h}
 		rl.DrawTexturePro(game_target.texture, source, dest, {0, 0}, 0, rl.WHITE)
 
 		rl.EndDrawing()
