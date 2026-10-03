@@ -165,7 +165,7 @@ collect_enhancements :: proc(g: ^Game) {
 		if !pk.active do continue
 
 		collector: ^Player = nil
-		best := math.F32_MAX
+		best: f32 = math.F32_MAX
 		for &p in g.players {
 			if p.dead || p.enhancement_count >= MAX_ENHANCEMENTS do continue
 			if !rl.CheckCollisionCircleRec(pk.pos, ENH_PICKUP_RADIUS, player_rect(p)) do continue
