@@ -29,6 +29,7 @@ make_player :: proc(index: int) -> Player {
 		p.fire_key      = .F
 		p.skill_key     = .R
 		p.cycle_key     = .E
+		p.aim_key       = .Q
 		p.start_pos     = {200, 300}
 	case:
 		p.name          = "P2"
@@ -41,10 +42,12 @@ make_player :: proc(index: int) -> Player {
 		p.fire_key      = .PERIOD
 		p.skill_key     = .SLASH
 		p.cycle_key     = .COMMA
+		p.aim_key       = .M
 		p.start_pos     = {600, 300}
 	}
 	p.pos = p.start_pos
 	for k in SkillKind do p.wheel_w[k] = 1
+	p.skill_aim = true
 	return p
 }
 

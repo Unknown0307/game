@@ -178,7 +178,13 @@ draw_skill_wheel :: proc(p: Player, right_align: bool) {
 	scol := rl.LIGHTGRAY
 	switch {
 	case p.skill == .Rocket:
-		status = "AUTO FIRE" if p.fire_cd <= 0 else fmt.ctprintf("%.1fs", f32(p.fire_cd) / TICK_RATE)
+		if p.fire_cd > 0 {
+			status = fmt.ctprintf("%.1fs", f32(p.fire_cd) / TICK_RATE)
+		} else if p.skill_aim {
+			status = "AUTO-AIM"
+		} else {
+			status = "MANUAL AIM"
+		}
 	case p.skill == .Invisibility && p.invis_ticks > 0:
 		status = fmt.ctprintf("INVISIBLE %.1fs", f32(p.invis_ticks) / TICK_RATE)
 		scol = skill_color(.Invisibility)

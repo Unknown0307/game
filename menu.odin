@@ -276,8 +276,9 @@ draw_controls_page :: proc(g: ^Game) {
 	start_x := (f32(SCREEN_W) - (box_w * 2 + gap)) * 0.5
 	names    := [2]cstring{"PLAYER 1", "PLAYER 2"}
 	moves    := [2]cstring{"Move:  W A S D", "Move:  Arrow keys"}
-	fires    := [2]cstring{"Auto-fire (F: manual)", "Auto-fire (.: manual)"}
+	fires    := [2]cstring{"Fire:  auto  (F: Rocket only)", "Fire:  auto  (.: Rocket only)"}
 	skills   := [2]cstring{"Skill:  R   Next skill:  E", "Skill:  /   Next skill:  ,"}
+	aims     := [2]cstring{"Rocket auto-aim:  Q", "Rocket auto-aim:  M"}
 	for i in 0 ..< 2 {
 		bx := start_x + f32(i) * (box_w + gap)
 		col := g.players[i].hud_color
@@ -287,6 +288,7 @@ draw_controls_page :: proc(g: ^Game) {
 		draw_centered_at(moves[i], cx, 154, 20, rl.WHITE)
 		draw_centered_at(fires[i], cx, 180, 20, rl.WHITE)
 		draw_centered_at(skills[i], cx, 206, 18, rl.WHITE)
+		draw_centered_at(aims[i], cx, 228, 18, rl.WHITE)
 	}
 
 	draw_centered("Pause:  Esc or P        Fullscreen:  F11", 268, 20, rl.WHITE)

@@ -278,7 +278,9 @@ fire_gun :: proc(g: ^Game, p: ^Player, index: i32) {
 
 	muzzle := muzzle_world(p^, side)
 	dir := [2]f32{math.cos(p.angle), math.sin(p.angle)} // no target: straight ahead
-	if target, ok := nearest_front_enemy(g, p^); ok {
+	// The gun always aims itself; skill shots (rockets) only do when auto-aim is on.
+	aimed := p.skill != .Rocket || p.skill_aim
+	if target, ok := nearest_front_enemy(g, p^); ok && aimed {
 		d := target - muzzle
 		if linalg.length(d) > 0.001 do dir = linalg.normalize(d)
 	}
@@ -287,7 +289,7 @@ fire_gun :: proc(g: ^Game, p: ^Player, index: i32) {
 	if p.skill == .Rocket {
 		add_bullet(g, Bullet{
 			pos = muzzle, vel = dir * ROCKET_SPEED, life = 4.0,
-			from_player = true, rocket = true, owner = index,
+			from_player = true, rocket = true, homing = aimed, owner = index,
 			range_left = ROCKET_RANGE,
 		})
 		p.fire_cd = skill_cooldown(p^, ROCKET_COOLDOWN_TICKS)
@@ -296,7 +298,7 @@ fire_gun :: proc(g: ^Game, p: ^Player, index: i32) {
 	} else {
 		add_bullet(g, Bullet{
 			pos = muzzle, vel = dir * PLAYER_BULLET_SPEED, life = 2.0,
-			from_player = true, owner = index,
+			from_player = true, homing = true, owner = index,
 			range_left = PLAYER_BULLET_RANGE,
 		})
 		p.fire_cd = PLAYER_FIRE_COOLDOWN_TICKS
@@ -375,7 +377,9 @@ steer_player_shot :: proc(b: ^Bullet, target: [2]f32, dt: f32) {
 
 // Player shots hurt enemies only. Called from update_bullets.
 update_player_shot :: proc(g: ^Game, b: ^Bullet, dt: f32) {
-	if target, ok := nearest_enemy_to(g, b.pos); ok do steer_player_shot(b, target, dt)
+	if b.homing {
+		if target, ok := nearest_enemy_to(g, b.pos); ok do steer_player_shot(b, target, dt)
+	}
 	b.pos += b.vel * dt
 	b.range_left -= linalg.length(b.vel) * dt
 	b.life -= dt
@@ -484,10 +488,21 @@ handle_player_actions :: proc(g: ^Game) {
 		if p.dead do continue
 		if rl.IsKeyPressed(p.cycle_key) do cycle_skill(g, &p)
 		if rl.IsKeyPressed(p.skill_key) do activate_skill(g, &p, i)
-		// Auto-fire whenever an enemy is in the front slice; holding the fire key also shoots (straight ahead if none).
+		// Auto-aim toggle: only meaningful for a skill that aims (Rocket); ignored otherwise.
+		if p.skill == .Rocket && rl.IsKeyPressed(p.aim_key) {
+			p.skill_aim = !p.skill_aim
+			spawn_ring(g, player_center(p), skill_color(.Rocket), 14, 150, 0.3, 2.5)
+		}
+
+		// Auto-fire whenever an enemy is in the front slice. The fire key is disabled unless the taken
+		// skill uses it (Rocket): then holding it also shoots, straight ahead if nothing is in the slice.
+		// Rockets with auto-aim OFF never fire by themselves: they are fully manual.
 		if p.fire_cd <= 0 {
 			_, has_target := nearest_front_enemy(g, p)
-			if has_target || rl.IsKeyDown(p.fire_key) do fire_gun(g, &p, i32(i))
+			rocket := p.skill == .Rocket
+			auto   := has_target && (!rocket || p.skill_aim)
+			manual := rocket && rl.IsKeyDown(p.fire_key)
+			if auto || manual do fire_gun(g, &p, i32(i))
 		}
 	}
 }

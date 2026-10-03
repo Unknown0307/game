@@ -104,9 +104,10 @@ Player :: struct {
 	color:         rl.Color,
 	ship:          ShipStyle,
 	up, down, left, right: rl.KeyboardKey,
-	fire_key:      rl.KeyboardKey, // hold: shoot (bullets, or rockets with the Rocket skill)
+	fire_key:      rl.KeyboardKey, // hold: manual fire, only while the Rocket skill is taken (the gun auto-fires)
 	skill_key:     rl.KeyboardKey, // use the taken skill
 	cycle_key:     rl.KeyboardKey, // take the next owned skill
+	aim_key:       rl.KeyboardKey, // toggle auto-aim of skill shots (only works while the Rocket skill is taken)
 	start_pos:     [2]f32,
 
 	// Run state
@@ -119,6 +120,7 @@ Player :: struct {
 	coins:         i32,
 	score:         i32,
 	fire_cd:       i32, // ticks until the gun may fire again
+	skill_aim:     bool,               // auto-aim for skill shots (rockets): aimed + homing, or manual and straight
 	skill:         SkillKind,          // the taken skill (None at the start of a run)
 	skills_owned:  [SkillKind]bool,
 	skill_cd:      [SkillKind]i32,     // per-skill cooldown, in ticks
@@ -201,6 +203,7 @@ Bullet :: struct {
 	// Player shots / reflected shots
 	from_player: bool,  // fired by a player's gun: hurts enemies, never players
 	rocket:      bool,
+	homing:      bool,   // steers toward the nearest enemy (turn-radius limited)
 	range_left:  f32,   // player shots end after this much travel
 	reflected:   bool,  // an enemy bullet turned around by Surprise: hurts the *other* player
 	owner:       i32,   // player index (shooter, or the player who reflected it)
