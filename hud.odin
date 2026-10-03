@@ -82,7 +82,7 @@ draw_enhancement_slots :: proc(p: Player, x, y: i32, right_align: bool) {
 
 // --- Skill wheel (bottom-left for P1, bottom-right for P2) ---
 //
-// Four slices, one per skill. The taken skill gets the biggest slice, the others
+// Five slices, one per skill. The taken skill gets the biggest slice, the others
 // are squeezed into small ones. Owned skills are coloured, unknown ones are grey;
 // the bright part of a slice is its cooldown progress (full = ready).
 
@@ -112,7 +112,7 @@ draw_skill_wheel :: proc(p: Player, right_align: bool) {
 	order := SKILLS
 	total: f32 = 0
 	for k in order do total += p.wheel_w[k]
-	sizes: [4]f32
+	sizes: [len(SKILLS)]f32
 	for k, i in order do sizes[i] = p.wheel_w[k] / total * 360
 
 	// Rotate the wheel so the taken slice is centred on face_deg.
@@ -178,7 +178,7 @@ draw_skill_wheel :: proc(p: Player, right_align: bool) {
 	scol := rl.LIGHTGRAY
 	switch {
 	case p.skill == .Rocket:
-		status = "HOLD FIRE" if p.fire_cd <= 0 else fmt.ctprintf("%.1fs", f32(p.fire_cd) / TICK_RATE)
+		status = "AUTO FIRE" if p.fire_cd <= 0 else fmt.ctprintf("%.1fs", f32(p.fire_cd) / TICK_RATE)
 	case p.skill == .Invisibility && p.invis_ticks > 0:
 		status = fmt.ctprintf("INVISIBLE %.1fs", f32(p.invis_ticks) / TICK_RATE)
 		scol = skill_color(.Invisibility)

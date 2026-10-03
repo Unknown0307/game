@@ -76,13 +76,13 @@ float fbm(vec2 p) {
 
 void main() {
     vec2 uv = gl_FragCoord.xy / vec2(800.0, 600.0);
-    vec2 p = uv * vec2(2.6, 2.0) + seed;
-    float drift = time * 0.012;
+    vec2 p = uv * vec2(2.6, 2.0) + seed + vec2(sin(time * 0.05) * 0.18, cos(time * 0.04) * 0.12);
+    float drift = time * 0.035;
     float n = fbm(p + vec2(drift, -drift * 0.6));
     float m = fbm(p * 1.7 + vec2(5.2, 1.3) - vec2(drift * 1.4, 0.0));
     float cloudA = smoothstep(0.45, 0.85, n);
     float cloudB = smoothstep(0.50, 0.90, m);
-    vec3 col = base + colA * cloudA * 0.20 + colB * cloudB * 0.14;
+    vec3 col = base + colA * cloudA * 0.30 + colB * cloudB * 0.22;
     float vig = 1.0 - smoothstep(0.35, 1.05, length(uv - vec2(0.5)) * 1.25);
     finalColor = vec4(col * (0.55 + 0.45 * vig), 1.0);
 }

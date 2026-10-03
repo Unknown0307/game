@@ -14,6 +14,8 @@ import rl "vendor:raylib"
 //  * The common ability of every player is the gun: hold the fire key to shoot
 //    from the two wing guns. (Rocket skill: the gun fires rockets instead.)
 //  * Skills:  Explosion    - the old repel blast (cooldown 120 ticks)
+//             Repel        - 3 s cooldown: pushes every projectile, enemy and the other
+//                            player 6 ship sizes away
 //             Rocket       - passive while taken: rockets, 40 tick cooldown
 //             Invisibility - 5 s (300 ticks) invulnerable, 10 s (600 ticks) cooldown
 //             Surprise     - 40 ticks: everything that touches you is reflected
@@ -29,6 +31,7 @@ skill_name :: proc(kind: SkillKind) -> cstring {
 	case .Rocket:       return "ROCKET BULLETS"
 	case .Invisibility: return "INVISIBILITY"
 	case .Surprise:     return "SURPRISE"
+	case .Repel:        return "REPEL"
 	case .None:         return "NO SKILL"
 	}
 	return ""
@@ -40,6 +43,7 @@ skill_label :: proc(kind: SkillKind) -> cstring {
 	case .Rocket:       return "RKT"
 	case .Invisibility: return "INV"
 	case .Surprise:     return "SUR"
+	case .Repel:        return "REP"
 	case .None:         return "-"
 	}
 	return "-"
@@ -51,6 +55,7 @@ skill_color :: proc(kind: SkillKind) -> rl.Color {
 	case .Rocket:       return rl.Color{255, 85, 85, 255}
 	case .Invisibility: return rl.Color{120, 230, 255, 255}
 	case .Surprise:     return rl.Color{230, 110, 255, 255}
+	case .Repel:        return rl.Color{90, 255, 190, 255}
 	case .None:         return rl.Color{150, 150, 160, 255}
 	}
 	return rl.WHITE
@@ -63,6 +68,7 @@ skill_base_cooldown :: proc(kind: SkillKind) -> i32 {
 	case .Rocket:       return ROCKET_COOLDOWN_TICKS
 	case .Invisibility: return INVIS_COOLDOWN_TICKS
 	case .Surprise:     return SURPRISE_COOLDOWN_TICKS
+	case .Repel:        return REPEL_COOLDOWN_TICKS
 	case .None:         return 0
 	}
 	return 0
@@ -111,7 +117,7 @@ cycle_skill :: proc(g: ^Game, p: ^Player) {
 
 // --- Using skills ---
 
-activate_skill :: proc(g: ^Game, p: ^Player) {
+activate_skill :: proc(g: ^Game, p: ^Player, index: int) {
 	if p.skill == .None || p.skill_cd[p.skill] > 0 do return
 	c := player_center(p^)
 	switch p.skill {
@@ -127,6 +133,8 @@ activate_skill :: proc(g: ^Game, p: ^Player) {
 		p.skill_cd[.Surprise] = skill_cooldown(p^, SURPRISE_COOLDOWN_TICKS)
 		spawn_ring(g, c, skill_color(.Surprise), 36, 300, 0.4, 3.5)
 		add_shake(g, 3)
+	case .Repel:
+		use_repel(g, p, i32(index))
 	case .Rocket, .None:
 		// Rocket is passive: it changes what the gun fires.
 	}
@@ -159,6 +167,77 @@ use_explosion :: proc(g: ^Game, p: ^Player) {
 		} else {
 			kill_enemy(g, &e, p)
 		}
+	}
+}
+
+// --- Repel ---
+
+repel_radius :: proc(p: Player) -> f32 {
+	return REPEL_RADIUS_SHIPS * max(p.size.x, p.size.y)
+}
+
+// Everything within 6 ship sizes is thrown outward by 6 ship sizes:
+//  * projectiles (enemy shots, reflected shots, the OTHER player's shots) turn
+//    around and fly away from you; your own shots are left alone;
+//  * enemies, minions and the boss get a knock-back impulse (they decay like the
+//    boss repel, so total travel = impulse / KNOCK_DECAY = the repel radius);
+//  * the other player is knocked back the same way.
+use_repel :: proc(g: ^Game, p: ^Player, index: i32) {
+	center := player_center(p^)
+	radius := repel_radius(p^)
+	push   := radius * KNOCK_DECAY // impulse whose total travel is `radius`
+	col    := skill_color(.Repel)
+
+	p.skill_cd[.Repel] = skill_cooldown(p^, REPEL_COOLDOWN_TICKS)
+	p.repel_visual = REPEL_VISUAL_TIME
+	add_shake(g, 5)
+	spawn_ring(g, center, col, 48, radius * 3.0, 0.4, 3.5)
+	spawn_ring(g, center, rl.WHITE, 24, radius * 2.2, 0.3, 2.5)
+
+	// Projectiles
+	for &b in g.bullets {
+		if !b.active do continue
+		if b.from_player && b.owner == index do continue // your own shots pass
+		off := b.pos - center
+		dist := linalg.length(off)
+		if dist > radius do continue
+		dir := off / dist if dist > 0.001 else linalg.normalize0(-b.vel)
+		b.vel = dir * max(linalg.length(b.vel), BULLET_SPEED)
+		b.pos = center + dir * (radius + 4) // clear of the shield, flying away
+		if b.from_player {
+			b.range_left = max(b.range_left, 200)
+		} else {
+			b.life = max(b.life, 0.8)
+		}
+		spawn_burst(g, b.pos, col, 4, 110, 2)
+	}
+
+	// Enemies (any kind, the boss included; armed sticky bombs are already counting down)
+	for &e in g.enemies {
+		if !e.active || (e.kind == .Sticky && e.stuck) do continue
+		epos := closest_wrapped_pos(e, center)
+		off := epos - center
+		dist := linalg.length(off)
+		if dist - e.radius > radius do continue
+		dir := off / dist if dist > 0.001 else [2]f32{1, 0}
+		e.knock = dir * push
+		if e.kind == .Boss {
+			e.dash_t = 0
+			e.dash_windup = 0
+			e.charge = 0
+		}
+		spawn_burst(g, epos, col, 5, 150, 2.5)
+	}
+
+	// The other player
+	for &q, qi in g.players {
+		if i32(qi) == index || q.dead do continue
+		off := player_center(q) - center
+		dist := linalg.length(off)
+		if dist > radius do continue
+		dir := off / dist if dist > 0.001 else [2]f32{1, 0}
+		q.knock = dir * push
+		spawn_burst(g, player_center(q), col, 12, 190, 3)
 	}
 }
 
@@ -198,14 +277,18 @@ fire_gun :: proc(g: ^Game, p: ^Player, index: i32) {
 	p.muzzle_flash[0 if side < 0 else 1] = 0.09
 
 	muzzle := muzzle_world(p^, side)
-	dir := [2]f32{math.cos(p.angle), math.sin(p.angle)}
+	dir := [2]f32{math.cos(p.angle), math.sin(p.angle)} // no target: straight ahead
+	if target, ok := nearest_front_enemy(g, p^); ok {
+		d := target - muzzle
+		if linalg.length(d) > 0.001 do dir = linalg.normalize(d)
+	}
 	col := p.color
 
 	if p.skill == .Rocket {
 		add_bullet(g, Bullet{
 			pos = muzzle, vel = dir * ROCKET_SPEED, life = 4.0,
 			from_player = true, rocket = true, owner = index,
-			range_left = ROCKET_RANGE_SHIPS * p.size.x,
+			range_left = ROCKET_RANGE,
 		})
 		p.fire_cd = skill_cooldown(p^, ROCKET_COOLDOWN_TICKS)
 		spawn_burst(g, muzzle, skill_color(.Rocket), 6, 120, 2.5)
@@ -214,7 +297,7 @@ fire_gun :: proc(g: ^Game, p: ^Player, index: i32) {
 		add_bullet(g, Bullet{
 			pos = muzzle, vel = dir * PLAYER_BULLET_SPEED, life = 2.0,
 			from_player = true, owner = index,
-			range_left = PLAYER_BULLET_RANGE_SHIPS * p.size.x,
+			range_left = PLAYER_BULLET_RANGE,
 		})
 		p.fire_cd = PLAYER_FIRE_COOLDOWN_TICKS
 		spawn_burst(g, muzzle, col, 3, 90, 2)
@@ -253,8 +336,46 @@ rocket_explode :: proc(g: ^Game, pos: [2]f32, shooter: ^Player) {
 	}
 }
 
+// Nearest enemy on the map (the boss counts at its closest screen-wrapped copy).
+// Enemies still off-screen are ignored.
+// With `half_arc` < PI only enemies within that angle of `facing` count (a front slice).
+nearest_enemy_to :: proc(g: ^Game, from: [2]f32, facing: f32 = 0, half_arc: f32 = math.PI) -> (pos: [2]f32, found: bool) {
+	best: f32 = math.F32_MAX
+	for e in g.enemies {
+		if !e.active do continue
+		epos := closest_wrapped_pos(e, from)
+		if outside_play_area(epos, 0) do continue
+		if half_arc < math.PI {
+			off := epos - from
+			if angle_gap(facing, math.atan2(off.y, off.x)) > half_arc do continue
+		}
+		d := linalg.length(epos - from)
+		if d < best {
+			best, pos, found = d, epos, true
+		}
+	}
+	return
+}
+
+// The auto-fire target: nearest enemy inside the slice in front of the ship.
+nearest_front_enemy :: proc(g: ^Game, p: Player) -> (pos: [2]f32, found: bool) {
+	return nearest_enemy_to(g, player_center(p), p.angle, PLAYER_AUTOFIRE_ARC_DEG * 0.5 * math.RAD_PER_DEG)
+}
+
+// Turns the shot toward `target`, limited by PLAYER_BULLET_MIN_TURN_RADIUS (its curvature limit).
+steer_player_shot :: proc(b: ^Bullet, target: [2]f32, dt: f32) {
+	speed := linalg.length(b.vel)
+	if speed < 0.001 do return
+	cur  := math.atan2(b.vel.y, b.vel.x)
+	want := math.atan2(target.y - b.pos.y, target.x - b.pos.x)
+	max_turn := speed / PLAYER_BULLET_MIN_TURN_RADIUS * dt
+	ang := turn_toward(cur, want, max_turn)
+	b.vel = {math.cos(ang), math.sin(ang)} * speed
+}
+
 // Player shots hurt enemies only. Called from update_bullets.
 update_player_shot :: proc(g: ^Game, b: ^Bullet, dt: f32) {
+	if target, ok := nearest_enemy_to(g, b.pos); ok do steer_player_shot(b, target, dt)
 	b.pos += b.vel * dt
 	b.range_left -= linalg.length(b.vel) * dt
 	b.life -= dt
@@ -357,13 +478,17 @@ tick_reflected_enemies :: proc(g: ^Game) {
 	}
 }
 
-// Per-frame input: cycle, use skill, hold-to-fire.
+// Per-frame input: cycle, use skill, auto-fire (the fire key is a manual override).
 handle_player_actions :: proc(g: ^Game) {
 	for &p, i in g.players {
 		if p.dead do continue
 		if rl.IsKeyPressed(p.cycle_key) do cycle_skill(g, &p)
-		if rl.IsKeyPressed(p.skill_key) do activate_skill(g, &p)
-		if rl.IsKeyDown(p.fire_key) && p.fire_cd <= 0 do fire_gun(g, &p, i32(i))
+		if rl.IsKeyPressed(p.skill_key) do activate_skill(g, &p, i)
+		// Auto-fire whenever an enemy is in the front slice; holding the fire key also shoots (straight ahead if none).
+		if p.fire_cd <= 0 {
+			_, has_target := nearest_front_enemy(g, p)
+			if has_target || rl.IsKeyDown(p.fire_key) do fire_gun(g, &p, i32(i))
+		}
 	}
 }
 

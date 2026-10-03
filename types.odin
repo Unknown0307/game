@@ -25,9 +25,10 @@ SkillKind :: enum {
 	Rocket,       // gun fires rockets (small blast) while this skill is the taken one
 	Invisibility, // invulnerable for 5 s
 	Surprise,     // 40 ticks: everything that touches you is reflected, you take no damage
+	Repel,        // 3 s cooldown: shoves every projectile, enemy and the other player 6 ship sizes away
 }
 
-SKILLS :: [4]SkillKind{.Explosion, .Rocket, .Invisibility, .Surprise}
+SKILLS :: [5]SkillKind{.Explosion, .Repel, .Rocket, .Invisibility, .Surprise}
 
 // What the boss looks like (the whale is the original; the mothership shoots).
 BossSkin :: enum {
@@ -47,6 +48,7 @@ EnemyKind :: enum {
 	Sticky, // the slow "bomb": sticks, waits a few ticks, explodes
 	Minion, // baby whale summoned by the boss (runner-like steering)
 	Boss,   // huge space whale, lots of health, wraps around the screen
+	Asteroid, // drifting rock: flies straight, never chases, drops nothing
 }
 
 FloatKind :: enum {
@@ -126,6 +128,7 @@ Player :: struct {
 	gun_flip:      bool,
 	muzzle_flash:  [2]f32,             // seconds left of the flash on each wing gun
 	visual_timer:  f32,
+	repel_visual:  f32, // seconds left of the Repel shockwave
 	hurt_flash:    f32,
 	angle:         f32,
 	target_angle:  f32,
@@ -154,6 +157,8 @@ Enemy :: struct {
 	heading:  [2]f32, // runner / minion heading
 	angle:    f32,    // facing, for drawing the ship
 	stuck:    bool,   // sticky bomb state
+	spin:     f32,    // asteroid tumble (rad/s)
+	knock:    [2]f32, // Repel knock-back velocity, decays over time
 
 	// Big enemy weapons
 	laser:       bool, // Big variant: fires a short laser instead of bullets
@@ -275,6 +280,35 @@ LevelParams :: struct {
 	boss_summon_cd: f32,
 }
 
+// --- Space backdrop ---
+BodyKind :: enum {
+	Planet,
+	GasGiant, // banded, always has rings
+	Sun,
+	Pulsar,
+}
+
+CelestialBody :: struct {
+	kind:       BodyKind,
+	origin:     [2]f32, // position at age 0
+	vel:        [2]f32, // slow drift (px/s)
+	radius:     f32,
+	color_a:    rl.Color,
+	color_b:    rl.Color,
+	belt:       bool,   // surrounded by an asteroid belt (=> lots of asteroid spawns)
+	belt_scale: f32,    // belt radius / body radius
+	belt_speed: f32,    // orbit speed (rad/s)
+	spin:       f32,    // pulsar beam / sun ray rotation (rad/s)
+	phase:      f32,
+	seed:       u32,
+}
+
+Backdrop :: struct {
+	bodies: [MAX_BODIES]CelestialBody,
+	count:  int,
+	age:    f32, // seconds since the level began (drives all drifting)
+}
+
 // Visual effects state
 Fx :: struct {
 	particles:     [MAX_PARTICLES]Particle,
@@ -296,6 +330,7 @@ Game :: struct {
 	skill_pickups: [MAX_SKILL_PICKUPS]SkillPickup,
 	fx:          Fx,
 	shaders:     Shaders,
+	backdrop:    Backdrop,
 
 	phase:        GamePhase,
 	level:        i32,
@@ -311,6 +346,7 @@ Game :: struct {
 	spawn_timer: f32,
 	coin_timer:  f32,
 	ally_timer:  f32,
+	asteroid_timer: f32,
 	tick_accum:  f32,
 	boss_warn:   f32,
 

@@ -59,7 +59,7 @@ draw_glows :: proc(g: ^Game) {
 			draw_glow(e.pos, e.radius * scale, rl.Color{255, 80, 210, 255}, 0.28)
 		case .Minion:
 			draw_glow(e.pos, e.radius * 1.8, rl.Color{200, 120, 255, 255}, 0.18)
-		case .Normal, .Runner:
+		case .Normal, .Runner, .Asteroid:
 		}
 	}
 	for p in g.players {
@@ -314,6 +314,12 @@ draw_shockwaves :: proc(g: ^Game, shake_off: [2]f32) {
 		// Brighten the pure primary colours so the wave reads clearly.
 		tint = {max(tint.x, 0.3), max(tint.y, 0.3), max(tint.z, 0.3)}
 		draw_blast(g.shaders.blast, player_center(p) + shake_off, progress, REPULSION_RADIUS, tint)
+	}
+	for p in g.players {
+		if p.repel_visual <= 0 do continue
+		progress := (REPEL_VISUAL_TIME - p.repel_visual) / REPEL_VISUAL_TIME
+		rc := color_vec(skill_color(.Repel))
+		draw_blast(g.shaders.blast, player_center(p) + shake_off, progress, repel_radius(p), rc)
 	}
 	for e in g.enemies {
 		if !e.active || e.kind != .Boss || e.repel_visual <= 0 do continue

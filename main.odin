@@ -11,7 +11,7 @@ import rl "vendor:raylib"
 //   difficulty.odin  level number -> linear difficulty parameters
 //   game.odin        lifecycle, phases, level progression, update loop
 //   player.odin      players, shields, enhancements, damage
-//   skills.odin      skills (explosion, rocket, invisibility, surprise), the gun, skill dice
+//   skills.odin      skills (explosion, repel, rocket, invisibility, surprise), the gun, skill dice
 //   enemy.odin       enemy creation, steering, collisions, kills
 //   enemy_art.odin   how every enemy looks (ships, rockets, space whales)
 //   ship_art.odin    how the two player ships look (P1 dart, P2 twin-boom gunship)
@@ -20,7 +20,8 @@ import rl "vendor:raylib"
 //   pickups.odin     coins, allies, enhancement drops
 //   fx.odin          particles, floating text, shake
 //   shaders.odin     GLSL + loaders
-//   style.odin       level palette, starfield backdrop, black hole
+//   style.odin       level palettes, starfield, black hole
+//   backdrop.odin    drifting planets / suns / pulsars / asteroid belts / comets behind the arena
 //   render.odin      world drawing
 //   hud.odin         HUD and phase screens
 //   menu.odin        main menu, pause, settings, controls, confirm dialogs

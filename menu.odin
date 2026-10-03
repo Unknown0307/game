@@ -276,7 +276,7 @@ draw_controls_page :: proc(g: ^Game) {
 	start_x := (f32(SCREEN_W) - (box_w * 2 + gap)) * 0.5
 	names    := [2]cstring{"PLAYER 1", "PLAYER 2"}
 	moves    := [2]cstring{"Move:  W A S D", "Move:  Arrow keys"}
-	fires    := [2]cstring{"Fire:  F (hold)", "Fire:  . (hold)"}
+	fires    := [2]cstring{"Auto-fire (F: manual)", "Auto-fire (.: manual)"}
 	skills   := [2]cstring{"Skill:  R   Next skill:  E", "Skill:  /   Next skill:  ,"}
 	for i in 0 ..< 2 {
 		bx := start_x + f32(i) * (box_w + gap)
@@ -293,8 +293,8 @@ draw_controls_page :: proc(g: ^Game) {
 
 	draw_centered("Score together to fill the level goal, then both players", 308, 17, rl.LIGHTGRAY)
 	draw_centered("fly into the portal. A dead player returns next level.", 330, 17, rl.LIGHTGRAY)
-	draw_centered("Your guns always work. Skill dice (rare) roll a skill into your wheel:", 362, 17, rl.LIGHTGRAY)
-	draw_centered("Explosion, Rocket Bullets, Invisibility 5s, Surprise (reflects touches).", 384, 17, rl.LIGHTGRAY)
+	draw_centered("Guns auto-fire with homing shots. Skill dice (rare) roll a skill into your wheel:", 362, 17, rl.LIGHTGRAY)
+	draw_centered("Explosion, Repel (3s), Rocket Bullets, Invisibility, Surprise (reflects).", 384, 17, rl.LIGHTGRAY)
 	draw_centered("Reflected enemies and bullets can hurt the OTHER player!", 406, 17, rl.LIGHTGRAY)
 	draw_centered("Coins add score. Green allies heal, grey allies grant shields.", 432, 17, rl.LIGHTGRAY)
 	draw_centered("Up to 3 enhancements can be collected per player.", 454, 17, rl.LIGHTGRAY)

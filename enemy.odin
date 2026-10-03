@@ -66,6 +66,13 @@ make_enemy :: proc(kind: EnemyKind, lp: LevelParams) -> Enemy {
 		e.speed  = rand.float32_range(140.0, 195.0) * mult
 		e.color  = rl.Color{210, 130, 255, 255}
 		e.points = 12
+	case .Asteroid:
+		e.radius = rand.float32_range(ASTEROID_RADIUS_MIN, ASTEROID_RADIUS_MAX)
+		e.speed  = rand.float32_range(ASTEROID_SPEED_MIN, ASTEROID_SPEED_MAX) * min(mult, 1.3)
+		e.color  = rl.Color{150, 135, 120, 255}
+		e.damage = 2 if e.radius >= 17.0 else 1
+		e.points = ASTEROID_POINTS
+		e.spin   = rand.float32_range(-1.6, 1.6)
 	case .Boss:
 		e.radius = BOSS_RADIUS
 		e.speed  = min(BOSS_BASE_SPEED * mult, PLAYER_MAX_SPEED * BOSS_SPEED_CAP)
@@ -239,6 +246,11 @@ turn_toward :: proc(cur, want, max_step: f32) -> f32 {
 }
 
 move_enemy :: proc(g: ^Game, e: ^Enemy, dt: f32) {
+	if e.kind == .Asteroid {
+		e.pos += e.heading * e.speed * dt
+		e.angle += e.spin * dt
+		return
+	}
 	wrap := e.kind == .Boss
 	target, _, found := nearest_target(g, e.pos, wrap)
 	if !found do return
@@ -261,6 +273,8 @@ move_enemy :: proc(g: ^Game, e: ^Enemy, dt: f32) {
 	case .Normal, .Big, .Sticky:
 		e.pos += dir * e.speed * dt
 		e.angle = turn_toward(e.angle, want, 8.0 * dt)
+	case .Asteroid:
+		// handled in update_enemies (asteroids ignore targets)
 	}
 }
 
@@ -279,7 +293,7 @@ emit_enemy_trail :: proc(g: ^Game, e: Enemy) {
 	case .Boss:
 		jitter := [2]f32{rand.float32_range(-1, 1), rand.float32_range(-1, 1)}
 		spawn_particle(g, e.pos + jitter * (e.radius * 0.6), jitter * 40, rl.Color{255, 60, 60, 255} if e.enraged else rl.Color{255, 90, 200, 255}, 0.5, 6)
-	case .Normal, .Big:
+	case .Normal, .Big, .Asteroid:
 	}
 }
 
@@ -292,6 +306,14 @@ update_enemies :: proc(g: ^Game, dt: f32) {
 		if e.kind == .Sticky && e.stuck {
 			e.pos = e.stick_pos
 			continue
+		}
+
+		// Repel knock-back: an impulse that fades out (the enemy keeps its own steering on top).
+		if linalg.length(e.knock) > 1 {
+			e.pos += e.knock * dt
+			e.knock *= max(0, 1 - KNOCK_DECAY * dt)
+		} else {
+			e.knock = {}
 		}
 
 		// Reflected by Surprise: a straight-line missile until the effect runs out.
@@ -317,7 +339,7 @@ update_enemies :: proc(g: ^Game, dt: f32) {
 
 		// A runner that missed and flew far off-screen would otherwise live forever
 		// and slowly fill the enemy pool.
-		if (e.kind == .Runner || e.kind == .Minion) && outside_play_area(e.pos, RUNNER_CULL_MARGIN) {
+		if (e.kind == .Runner || e.kind == .Minion || e.kind == .Asteroid) && outside_play_area(e.pos, RUNNER_CULL_MARGIN) {
 			e.active = false
 		}
 	}
@@ -344,6 +366,9 @@ kill_enemy :: proc(g: ^Game, e: ^Enemy, killer: ^Player) {
 		}
 		roll_enhancement_drop(g, e.pos, true)
 		roll_skill_drop(g, e.pos, true)
+	} else if e.kind == .Asteroid {
+		// rocks are plentiful on belt levels: no coin / enhancement / skill rolls
+		spawn_burst(g, e.pos, rl.Color{190, 170, 150, 255}, 6, 120, 2.5)
 	} else {
 		if rand.float32() < COIN_DROP_CHANCE do spawn_coin_at(g, e.pos)
 		roll_enhancement_drop(g, e.pos, false)
@@ -419,7 +444,7 @@ enemy_hits_player :: proc(g: ^Game, p: ^Player, index: i32) {
 			e.stick_pos = e.pos
 			e.flash = 0.35
 			spawn_burst(g, e.pos, rl.Color{255, 220, 90, 255}, 18, 130, 3)
-		case .Normal, .Runner, .Big, .Minion:
+		case .Normal, .Runner, .Big, .Minion, .Asteroid:
 			e.active = false
 			hurt_player(g, p, e.damage)
 			spawn_burst(g, e.pos, e.color, 8, 150, 3)
@@ -455,4 +480,40 @@ enemies_hit_allies :: proc(g: ^Game) {
 			if !e.active do break
 		}
 	}
+}
+
+// --- Asteroids ---
+
+// Straight-line rock from just outside a random edge, aimed at a random point
+// of the arena (it never tracks the players).
+spawn_asteroid_at_edge :: proc(g: ^Game) {
+	e := spawn_enemy_at(g, .Asteroid, {})
+	if e == nil do return
+	e.pos = edge_spawn_position(e.radius)
+	aim := [2]f32{rand.float32_range(SCREEN_W * 0.15, SCREEN_W * 0.85), rand.float32_range(SCREEN_H * 0.15, SCREEN_H * 0.85)}
+	e.heading = linalg.normalize0(aim - e.pos)
+	e.angle = rand.float32_range(0, 2 * math.PI)
+}
+
+// Belt asteroid: sheds off the belt ring of a body that is on the map, drifting
+// outward and sideways. Never appears right next to a living player.
+spawn_asteroid_from_belt :: proc(g: ^Game, body_pos: [2]f32, ring_radius: f32) {
+	for _ in 0 ..< 8 {
+		ang := rand.float32_range(0, 2 * math.PI)
+		out := [2]f32{math.cos(ang), math.sin(ang)}
+		pos := body_pos + out * ring_radius
+		if pos.x < 10 || pos.x > SCREEN_W - 10 || pos.y < 10 || pos.y > SCREEN_H - 10 do continue
+
+		_, dist, found := nearest_player(g, pos)
+		if found && dist < ASTEROID_SAFE_DIST do continue
+
+		e := spawn_enemy_at(g, .Asteroid, pos)
+		if e == nil do return
+		sign: f32 = 1 if rand.int31_max(2) == 0 else -1
+		tangent := [2]f32{-out.y, out.x} * sign
+		e.heading = linalg.normalize0(tangent * 0.8 + out * 0.6)
+		e.angle = rand.float32_range(0, 2 * math.PI)
+		return
+	}
+	spawn_asteroid_at_edge(g) // the ring is mostly off-screen or crowded: fall back to the edge
 }

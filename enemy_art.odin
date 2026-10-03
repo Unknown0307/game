@@ -344,6 +344,25 @@ draw_drone :: proc(e: Enemy, col: rl.Color, t, ph: f32) {
 
 // --- Dispatcher ---
 
+// --- Asteroid ---
+
+draw_asteroid :: proc(e: Enemy, col: rl.Color, ph: f32) {
+	n :: 10
+	pts: [n][2]f32
+	for i in 0 ..< n {
+		a := f32(i) / f32(n) * 2 * math.PI + e.angle
+		k := 0.78 + 0.22 * math.sin(f32(i) * 2.3 + ph * 3.1) + 0.08 * math.sin(f32(i) * 5.1 + ph)
+		pts[i] = e.pos + [2]f32{math.cos(a), math.sin(a)} * e.radius * k
+	}
+	draw_fan_ccw(e.pos, pts[:], shade(col, 0.75))
+	// lit side + craters
+	lit := e.pos + rotate_vec({-0.2, -0.25}, e.angle) * e.radius
+	rl.DrawCircleV(lit, e.radius * 0.45, shade(col, 0.95))
+	rl.DrawCircleV(e.pos + rotate_vec({0.35, 0.2}, e.angle) * e.radius, e.radius * 0.2, shade(col, 0.5))
+	rl.DrawCircleV(e.pos + rotate_vec({-0.4, 0.4}, e.angle) * e.radius, e.radius * 0.14, shade(col, 0.55))
+	draw_poly_outline(pts[:], rl.Fade(rl.WHITE, 0.3))
+}
+
 draw_enemies :: proc(g: ^Game) {
 	t := g.time
 	for e, idx in g.enemies {
@@ -354,6 +373,7 @@ draw_enemies :: proc(g: ^Game) {
 
 		switch e.kind {
 		case .Normal: draw_raider(e, col, t, ph)
+		case .Asteroid: draw_asteroid(e, col, ph)
 		case .Runner: draw_rocket(e, col, t, ph)
 		case .Big:    draw_cruiser(e, col, t, ph)
 		case .Sticky:

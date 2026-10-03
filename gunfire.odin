@@ -12,7 +12,7 @@ import rl "vendor:raylib"
 //    alternating between their two turrets, at the nearest player/ally.
 //  * Laser cruisers (BIG_LASER_CHANCE of Big spawns) instead switch on a beam
 //    for LASER_TICKS (15 ticks). The beam starts at the enemy's centre and is
-//    LASER_RANGE_SIZE_MULT x the enemy's size (its diameter) long.
+//    long enough to reach the END OF THE MAP in the direction it faces.
 //
 // Cooldowns are counted in the fixed 60 Hz ticks (update_ticks in game.odin);
 // bullet flight and drawing run per frame.
@@ -21,8 +21,26 @@ import rl "vendor:raylib"
 BULLET_COLOR :: rl.Color{255, 130, 70, 255}
 LASER_COLOR  :: rl.Color{90, 230, 255, 255}
 
+// Distance from `origin` along `dir` to the edge of the map (the screen rectangle).
+distance_to_map_edge :: proc(origin, dir: [2]f32) -> f32 {
+	best: f32 = MAP_DIAGONAL
+	if dir.x > 0.0001 {
+		best = min(best, (f32(SCREEN_W) - origin.x) / dir.x)
+	} else if dir.x < -0.0001 {
+		best = min(best, (0 - origin.x) / dir.x)
+	}
+	if dir.y > 0.0001 {
+		best = min(best, (f32(SCREEN_H) - origin.y) / dir.y)
+	} else if dir.y < -0.0001 {
+		best = min(best, (0 - origin.y) / dir.y)
+	}
+	return max(best, 0)
+}
+
+// The cruiser's beam starts at its centre and ends at the map edge it is facing.
 laser_length :: proc(e: Enemy) -> f32 {
-	return e.radius * 2.0 * LASER_RANGE_SIZE_MULT
+	dir := [2]f32{math.cos(e.angle), math.sin(e.angle)}
+	return max(distance_to_map_edge(e.pos, dir), e.radius * 2.0)
 }
 
 angle_gap :: proc(a, b: f32) -> f32 {
@@ -187,7 +205,7 @@ update_enemy_guns :: proc(g: ^Game) {
 		if angle_gap(e.angle, want) > BIG_AIM_TOLERANCE do continue
 
 		if e.laser {
-			if dist <= laser_length(e) + LASER_TRIGGER_MARGIN {
+			if dist <= LASER_TRIGGER_RANGE {
 				e.laser_ticks = LASER_TICKS
 				add_shake(g, 2)
 			}

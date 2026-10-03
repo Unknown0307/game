@@ -33,14 +33,23 @@ SPIT_TIME        :: 1.1  // ships are flung back out of the black hole (seconds)
 PLAYER_MAX_SPEED  :: 300.0
 MAX_TAGS          :: 50 // a player dies after this many tags
 REPULSION_RADIUS  :: 180.0
+
+MAP_DIAGONAL :: 1000.0 // sqrt(SCREEN_W^2 + SCREEN_H^2): the longest straight line on the map
 BLAST_VISUAL_TIME :: 0.25
 KNOCK_DECAY       :: 6.0 // how fast boss knock-back velocity fades (1/s)
 
 // --- Player gun (the common ability: always available) ---
 PLAYER_FIRE_COOLDOWN_TICKS :: 18     // ticks between shots (alternates between the two wing guns)
 PLAYER_BULLET_SPEED        :: 560.0
-PLAYER_BULLET_RANGE_SHIPS  :: 2.0    // travel range, measured in player-ship lengths
+PLAYER_BULLET_RANGE        :: MAP_DIAGONAL // shots fly across the whole map (bullet life = 2 s = 1120 px, so the map edge ends them)
 PLAYER_BULLET_RADIUS       :: 3.5
+// Player shots (bullets and rockets) auto-fire and home in on the nearest enemy, but they
+// cannot turn sharper than this circle: turn rate = speed / radius (bigger = wider curves).
+// At 560 px/s, 140 px is 4 rad/s; try 70 for sharp homing or 300 for lazy arcs.
+PLAYER_BULLET_MIN_TURN_RADIUS :: 140.0
+// Auto-fire only picks targets inside this slice in front of the ship (total angle, centred on
+// the way the ship faces). 360 = all around, 90 = a quarter-circle slice.
+PLAYER_AUTOFIRE_ARC_DEG :: 90.0
 PLAYER_BULLET_BOSS_DAMAGE  :: 1
 PLAYER_TRAIL_LENGTH        :: 32     // P1's long fading ribbon (frames of history)
 PLAYER2_TRAIL_LENGTH       :: 14
@@ -50,7 +59,7 @@ PLAYER2_TRAIL_LENGTH       :: 14
 EXPLOSION_COOLDOWN_TICKS :: i32(2 * TICK_RATE)   // 2 s  = 120 ticks (the old blast cooldown)
 ROCKET_COOLDOWN_TICKS    :: 40                   // time between rockets
 ROCKET_SPEED             :: 430.0
-ROCKET_RANGE_SHIPS       :: 3.0                  // "high range": 3 ship lengths (normal bullets: 2)
+ROCKET_RANGE             :: MAP_DIAGONAL         // rockets also cross the whole map (never less than a normal shot)
 ROCKET_BLAST_RADIUS      :: 38.0                 // small explosion
 ROCKET_BOSS_DAMAGE       :: 2
 INVIS_DURATION_TICKS     :: i32(5 * TICK_RATE)   // 5 s  = 300 ticks of invulnerability
@@ -59,6 +68,9 @@ SURPRISE_DURATION_TICKS  :: 40                   // reflect window
 SURPRISE_COOLDOWN_TICKS  :: i32(15 * TICK_RATE)  // 15 s = 900 ticks (counted from activation)
 SURPRISE_REFLECT_SPEED   :: 440.0                // speed of a reflected enemy
 SURPRISE_REFLECT_TICKS   :: 75                   // how long a reflected enemy stays a missile
+REPEL_COOLDOWN_TICKS     :: i32(3 * TICK_RATE)   // 3 s  = 180 ticks
+REPEL_RADIUS_SHIPS       :: 6.0                  // reach AND push distance, in ship sizes (30 px ship -> 180 px)
+REPEL_VISUAL_TIME        :: 0.4
 SKILL_WHEEL_BIG          :: 3.0                  // wheel weight of the taken skill (others = 1.0)
 
 // --- Skill dice drops (rarer than enhancements) ---
@@ -179,9 +191,9 @@ BULLET_LIFETIME :: 3.0
 MAX_BULLETS     :: 240
 
 LASER_TICKS              :: 15    // how long the beam stays on
-LASER_RANGE_SIZE_MULT    :: 1.5   // beam length = this x the enemy's size (its diameter), from its centre
+// The laser cruiser's beam now runs from its centre to the END OF THE MAP (see laser_length in gunfire.odin).
 LASER_COOLDOWN_TICKS     :: 20    // pause after the beam switches off
-LASER_TRIGGER_MARGIN     :: 20.0  // fires when a target is within beam length + this
+LASER_TRIGGER_RANGE      :: MAP_DIAGONAL // fires at any target on the map (it still has to face it and be on-screen)
 LASER_WIDTH              :: 7.0
 LASER_DAMAGE             :: 2
 LASER_HIT_INTERVAL_TICKS :: 5     // the beam hurts every 5 ticks (3 hits per shot)
@@ -202,3 +214,19 @@ ALLY_RADIUS      :: 14.0
 ALLY_HP          :: 3
 ALLY_LIFETIME    :: 15.0
 HEAL_AMOUNT      :: 10
+
+// --- Asteroids (drifting rocks; they do not chase) ---
+ASTEROID_RADIUS_MIN       :: 9.0
+ASTEROID_RADIUS_MAX       :: 24.0
+ASTEROID_SPEED_MIN        :: 60.0
+ASTEROID_SPEED_MAX        :: 150.0
+ASTEROID_POINTS           :: 4
+ASTEROID_RATE_IDLE        :: 0.15  // per second while no asteroid belt is on the map
+ASTEROID_RATE_BELT        :: 2.2   // per second while a belt is on the map (high!)
+ASTEROID_SAFE_DIST        :: 140.0 // belt asteroids never appear this close to a living player
+
+// --- Space backdrop (backdrop.odin): planets, suns, pulsars that drift across the map ---
+MAX_BODIES            :: 3
+BODY_DRIFT_MIN        :: 5.0    // px/s
+BODY_DRIFT_MAX        :: 12.0
+BODY_BELT_CHANCE      :: 0.45   // planets / suns / ringless gas giants; pulsars use a lower chance

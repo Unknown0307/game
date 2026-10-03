@@ -26,12 +26,14 @@ set_level :: proc(g: ^Game, level: i32) {
 	g.level  = level
 	g.params = level_params(level)
 	g.style  = level_style(level)
+	g.backdrop = make_backdrop(level)
 }
 
 reset_level_timers :: proc(g: ^Game) {
 	g.spawn_timer = 0
 	g.coin_timer  = 1
 	g.ally_timer  = 6
+	g.asteroid_timer = 0
 	g.tick_accum  = 0
 	g.boss_warn   = 0
 }
@@ -291,6 +293,20 @@ update_spawners :: proc(g: ^Game, dt: f32) {
 		}
 	}
 
+	// Asteroids: a trickle normally, a flood while an asteroid belt drifts across the map.
+	rate: f32 = ASTEROID_RATE_IDLE
+	belt_pos, belt_r, has_belt := active_belt(g)
+	if has_belt do rate = ASTEROID_RATE_BELT
+	g.asteroid_timer += dt
+	for g.asteroid_timer >= 1.0 / rate {
+		g.asteroid_timer -= 1.0 / rate
+		if has_belt {
+			spawn_asteroid_from_belt(g, belt_pos, belt_r)
+		} else {
+			spawn_asteroid_at_edge(g)
+		}
+	}
+
 	g.ally_timer -= dt
 	if g.ally_timer <= 0 {
 		g.ally_timer = rand.float32_range(9.0, 15.0)
@@ -354,6 +370,7 @@ update_playing :: proc(g: ^Game, dt: f32) {
 game_update :: proc(g: ^Game, dt: f32) {
 	// Menus and the pause screen freeze the whole simulation.
 	if g.phase == .Menu || g.phase == .Paused {
+		if g.phase == .Menu do g.backdrop.age += dt // the title screen drifts too
 		update_menu(g)
 		return
 	}
@@ -362,6 +379,7 @@ game_update :: proc(g: ^Game, dt: f32) {
 		return
 	}
 
+	g.backdrop.age += dt
 	for &p in g.players do update_player_timers(&p, dt)
 	if g.boss_warn > 0 do g.boss_warn = max(0, g.boss_warn - dt)
 

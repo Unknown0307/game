@@ -58,6 +58,7 @@ revive_player :: proc(p: ^Player) {
 	p.invis_ticks = 0
 	p.surprise_ticks = 0
 	p.visual_timer = 0
+	p.repel_visual = 0
 	p.hurt_flash = 0
 	p.angle = 0
 	p.target_angle = 0
@@ -261,6 +262,7 @@ hurt_player :: proc(g: ^Game, p: ^Player, amount: i32) {
 
 update_player_timers :: proc(p: ^Player, dt: f32) {
 	if p.visual_timer > 0 do p.visual_timer = max(0, p.visual_timer - dt)
+	if p.repel_visual > 0 do p.repel_visual = max(0, p.repel_visual - dt)
 	for i in 0 ..< 2 {
 		if p.muzzle_flash[i] > 0 do p.muzzle_flash[i] = max(0, p.muzzle_flash[i] - dt)
 	}
