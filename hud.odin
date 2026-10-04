@@ -207,6 +207,9 @@ draw_skill_wheel :: proc(p: Player, right_align: bool) {
 		// still inside the 3 s freeze: the 30 s cooldown has not started yet
 		status = fmt.ctprintf("FROZEN %.1fs", f32(p.skill_cd[.Freeze] - skill_cooldown(p, FREEZE_COOLDOWN_TICKS)) / TICK_RATE)
 		scol = skill_color(.Freeze)
+	case p.skill == .Freeze && player_slowed(p):
+		status = fmt.ctprintf("SLOWED %.1fs", f32(p.slow_ticks) / TICK_RATE)
+		scol = skill_color(.Freeze)
 	case p.skill_cd[p.skill] > 0:
 		status = fmt.ctprintf("%.1fs", f32(p.skill_cd[p.skill]) / TICK_RATE)
 	case:

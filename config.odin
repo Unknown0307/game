@@ -35,7 +35,7 @@ MAX_HEALTH          :: 50 // a player dies after this many tags
 REPULSION_RADIUS  :: 180.0
 
 MAP_DIAGONAL :: 1000.0 // sqrt(SCREEN_W^2 + SCREEN_H^2): the longest straight line on the map
-BLAST_VISUAL_TIME :: 0.25
+BLAST_VISUAL_TIME :: 0.55 // the Explosion fireball shader needs a little longer than the plain wave
 KNOCK_DECAY       :: 6.0 // how fast boss knock-back velocity fades (1/s)
 
 // --- Player gun (the common ability: always available) ---
@@ -58,10 +58,10 @@ PLAYER2_TRAIL_LENGTH       :: 14
 // Every timer is in 60 Hz ticks. Seconds are converted with TICK_RATE.
 EXPLOSION_COOLDOWN_TICKS :: i32(2 * TICK_RATE)   // 2 s  = 120 ticks (the old blast cooldown)
 ROCKET_COOLDOWN_TICKS    :: 40                   // time between rockets
-ROCKET_SPEED             :: 500.0
+ROCKET_SPEED             :: 430.0
 ROCKET_RANGE             :: MAP_DIAGONAL         // rockets also cross the whole map (never less than a normal shot)
-ROCKET_BLAST_RADIUS      :: 40.0                 // small explosion
-ROCKET_BOSS_DAMAGE       :: 4
+ROCKET_BLAST_RADIUS      :: 38.0                 // small explosion
+ROCKET_BOSS_DAMAGE       :: 2
 INVIS_DURATION_TICKS     :: i32(5 * TICK_RATE)   // 5 s  = 300 ticks of invulnerability
 INVIS_COOLDOWN_TICKS     :: i32(10 * TICK_RATE)  // 10 s = 600 ticks (counted from activation)
 SURPRISE_DURATION_TICKS  :: 40                   // reflect window
@@ -89,6 +89,8 @@ FREEZE_DURATION_TICKS :: i32(3 * TICK_RATE)   // 3 s  = 180 ticks frozen
 FREEZE_COOLDOWN_TICKS :: i32(30 * TICK_RATE)  // 30 s = 1800 ticks, counted AFTER the freeze has ended
 FREEZE_VISUAL_TIME    :: 0.6                  // seconds of the expanding frost wave
 FREEZE_FADE_TICKS     :: 36                   // the ice melts away over the last 0.6 s
+FREEZE_SLOW_TICKS     :: i32(3 * TICK_RATE)   // after the thaw the user is slowed for 3 s ("slow" effect)
+FREEZE_SLOW_MULT      :: 0.5                  // speed multiplier while slowed
 
 // --- Come Back skill: jump back to where you were 5 s ago (once per level) ---
 REWIND_TICKS          :: 300                  // 5 s at 60 Hz of recorded history per player

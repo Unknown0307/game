@@ -20,7 +20,8 @@ import rl "vendor:raylib"
 //             Invisibility - 5 s (300 ticks) invulnerable, 10 s (600 ticks) cooldown
 //             Surprise     - 40 ticks: everything that touches you is reflected
 //                            (and can hurt the OTHER player), 15 s (900 ticks) cooldown
-//             Freeze       - everything except the players freezes for 3 s, then a 30 s cooldown
+//             Freeze       - everything except the players freezes for 3 s, then the user is slowed
+//                            for 3 s (50% speed) and a 30 s cooldown runs
 //             Come Back    - teleport to where you were 5 s ago (health restored to that moment,
 //                            cooldowns keep running, your minions are rewound too); once per level
 //  * All cooldowns are counted in the fixed 60 Hz ticks (update_ticks in game.odin).
@@ -168,7 +169,9 @@ use_explosion :: proc(g: ^Game, p: ^Player) {
 	p.skill_cd[.Explosion] = skill_cooldown(p^, EXPLOSION_COOLDOWN_TICKS)
 	p.visual_timer = BLAST_VISUAL_TIME
 	add_shake(g, 4)
-	spawn_ring(g, center, p.color, 40, 450, 0.3, 3)
+	spawn_ring(g, center, skill_color(.Explosion), 40, 450, 0.3, 3)
+	spawn_burst(g, center, skill_color(.Explosion), 30, 320, 3.5)
+	spawn_burst(g, center, rl.Color{255, 235, 170, 255}, 16, 200, 3)
 
 	for &e in g.enemies {
 		if !e.active do continue
@@ -275,6 +278,7 @@ use_freeze :: proc(g: ^Game, p: ^Player) {
 	g.freeze_ticks = FREEZE_DURATION_TICKS
 	g.freeze_time  = g.time
 	p.skill_cd[.Freeze] = FREEZE_DURATION_TICKS + skill_cooldown(p^, FREEZE_COOLDOWN_TICKS)
+	p.slow_ticks = FREEZE_DURATION_TICKS + FREEZE_SLOW_TICKS // slowed for 3 s once the freeze has ended
 	p.freeze_visual = FREEZE_VISUAL_TIME
 	add_shake(g, 6)
 	spawn_ring(g, c, col, 56, 700, 0.6, 3.5)
@@ -365,8 +369,8 @@ comeback_effect :: proc(g: ^Game, from, to: [2]f32, col: rl.Color) {
 muzzle_local :: proc(p: Player, side: f32) -> [2]f32 {
 	switch p.ship {
 	case .Fighter:
-		// The two short wing guns of the Dart.
-		return {p.size.x * 0.5 * 0.42, side * p.size.y * 0.5 * 0.62}
+		// The two wing-root guns of the Dart (slim arrow hull).
+		return {p.size.x * 0.5 * 0.10, side * p.size.y * 0.5 * 0.37}
 	case .Interceptor:
 		// The boom-tip guns of the Bulwark.
 		u := max(p.size.x, p.size.y) * 0.5
@@ -592,6 +596,7 @@ tick_player_skills :: proc(p: ^Player) {
 	if p.fire_cd > 0        do p.fire_cd -= 1
 	if p.invis_ticks > 0    do p.invis_ticks -= 1
 	if p.surprise_ticks > 0 do p.surprise_ticks -= 1
+	if p.slow_ticks > 0     do p.slow_ticks -= 1
 }
 
 tick_reflected_enemies :: proc(g: ^Game) {

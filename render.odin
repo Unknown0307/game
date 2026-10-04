@@ -130,6 +130,17 @@ draw_player :: proc(g: ^Game, p: Player) {
 		rl.DrawCircleLines(i32(center.x), i32(center.y), rad, rl.Fade(scol, 0.7))
 	}
 
+	// Freeze aftermath: a pale frost ring while the user is slowed.
+	if player_slowed(p) {
+		pulse := 0.5 + 0.5 * math.sin(t * 8)
+		fc := skill_color(.Freeze)
+		rad := max(p.size.x, p.size.y) * 0.5 * s + 9
+		rl.BeginBlendMode(.ADDITIVE)
+		draw_glow(center, rad + 8, fc, 0.18 + 0.12 * pulse)
+		rl.EndBlendMode()
+		rl.DrawCircleLines(i32(center.x), i32(center.y), rad, rl.Fade(fc, 0.35 + 0.35 * pulse))
+	}
+
 	// Shield shell around the ship.
 	shields := shield_count(p)
 	if shields > 0 {
@@ -320,10 +331,7 @@ draw_shockwaves :: proc(g: ^Game, shake_off: [2]f32) {
 	for p in g.players {
 		if p.visual_timer <= 0 do continue
 		progress := (BLAST_VISUAL_TIME - p.visual_timer) / BLAST_VISUAL_TIME
-		tint := [3]f32{f32(p.color.r) / 255.0, f32(p.color.g) / 255.0, f32(p.color.b) / 255.0}
-		// Brighten the pure primary colours so the wave reads clearly.
-		tint = {max(tint.x, 0.3), max(tint.y, 0.3), max(tint.z, 0.3)}
-		draw_blast(g.shaders.blast, player_center(p) + shake_off, progress, REPULSION_RADIUS, tint)
+		draw_explosion(g.shaders.explosion, player_center(p) + shake_off, progress, REPULSION_RADIUS, color_vec(skill_color(.Explosion)))
 	}
 	for p in g.players {
 		if p.repel_visual <= 0 do continue

@@ -51,6 +51,11 @@ make_player :: proc(index: int) -> Player {
 	return p
 }
 
+// The Freeze skill leaves its user slowed once the freeze is over.
+player_slowed :: proc(p: Player) -> bool {
+	return p.slow_ticks > 0 && p.slow_ticks <= FREEZE_SLOW_TICKS
+}
+
 // Brings a dead player back at the start of a new level.
 revive_player :: proc(p: ^Player) {
 	p.dead = false
@@ -63,6 +68,7 @@ revive_player :: proc(p: ^Player) {
 	p.visual_timer = 0
 	p.repel_visual = 0
 	p.freeze_visual = 0
+	p.slow_ticks = 0
 	p.rewind_visual = 0
 	p.comeback_used = false
 	p.hurt_flash = 0
@@ -272,6 +278,7 @@ hurt_player :: proc(g: ^Game, p: ^Player, amount: i32) {
 		p.shield_ticks = {}
 		p.invis_ticks = 0
 		p.surprise_ticks = 0
+		p.slow_ticks = 0
 		spawn_burst(g, center, p.color, 60, 320, 4)
 		spawn_burst(g, center, rl.WHITE, 30, 220, 3)
 		add_shake(g, 16)
@@ -362,7 +369,9 @@ update_player_movement :: proc(g: ^Game, p: ^Player, dt: f32) {
 	if linalg.length(dir) > 0.001 {
 		dir = linalg.normalize(dir)
 		p.target_angle = math.atan2(dir.y, dir.x)
-		p.pos += dir * p.speed * dt
+		speed := p.speed
+		if player_slowed(p^) do speed *= FREEZE_SLOW_MULT
+		p.pos += dir * speed * dt
 		thrust_target = 1
 	}
 	p.thrust += (thrust_target - p.thrust) * min(1.0, 9.0 * dt)

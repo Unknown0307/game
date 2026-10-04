@@ -92,26 +92,17 @@ void main() {
 }
 `
 
-// Player 1's hull: an iridescent energy-plasma skin. The pattern lives in SHIP-LOCAL space
-// (x = forward) so it flows from the nose to the tail and turns with the ship.
+// Player 1's hull: slim gloss-black plating with navy accents. The pattern lives in SHIP-LOCAL
+// space (x = forward) so it turns with the ship: a navy spine, swept chevron panel lines and a
+// slow pulse of navy light running nose -> tail (faster under thrust).
 DART_FS: cstring : `#version 330
 in vec4 fragColor;
 uniform float time;
-uniform vec3  tint;
+uniform vec3  tint;     // the navy accent colour
 uniform vec2  center;   // ship centre in framebuffer pixels (origin bottom-left)
 uniform float angle;    // ship heading (radians, y-down world)
 uniform float thrust;   // 0..1
 out vec4 finalColor;
-
-float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-float noise(vec2 p) {
-    vec2 i = floor(p);
-    vec2 f = fract(p);
-    f = f * f * (3.0 - 2.0 * f);
-    return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x),
-               mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
-}
-vec3 pal(float t) { return 0.5 + 0.5 * cos(6.28318 * (t + vec3(0.00, 0.33, 0.67))); }
 
 void main() {
     vec2 v = gl_FragCoord.xy - center;
@@ -123,64 +114,191 @@ void main() {
     // The hurt flash paints the hull pure white: keep it white.
     float flash = step(0.97, min(min(fragColor.r, fragColor.g), fragColor.b));
 
-    // Plasma flowing from the nose to the tail; faster under thrust.
-    float flow = time * (3.0 + 4.0 * thrust);
-    float n1 = noise(l * 0.22 + vec2(flow * 0.35, 0.0));
-    float n2 = noise(l * 0.55 - vec2(flow * 0.80, time * 0.5));
-    float plasma = 0.6 * n1 + 0.4 * n2;
+    float ay = abs(l.y);
 
-    // Iridescent sheen, kept in the icy-blue family.
-    vec3 irid = pal(l.x * 0.035 + plasma * 0.55 - time * 0.25);
-    irid = mix(irid, vec3(0.55, 0.85, 1.0), 0.45);
+    // Gloss-black base with a faint navy sheen that rolls along the hull.
+    vec3 black = vec3(0.012, 0.014, 0.026);
+    float sheen = 0.5 + 0.5 * sin(l.x * 0.18 - time * 1.2);
+    vec3 col = black + tint * 0.06 * sheen;
 
-    // Energy veins streaming tail-ward.
-    float vein = pow(0.5 + 0.5 * sin(l.x * 0.6 - flow * 1.4 + n2 * 5.0), 10.0)
-               * smoothstep(0.35, 0.9, noise(vec2(l.y * 0.45, 3.0)));
+    // Navy spine down the centre line.
+    float spine = 1.0 - smoothstep(0.8, 2.2, ay);
+    col = mix(col, tint * 0.9, spine * 0.85);
 
-    float nose  = smoothstep(-12.0, 22.0, l.x);
-    float pulse = 0.5 + 0.5 * sin(time * 7.0);
-    float sparkle = step(0.965, hash(floor(l * 1.4) + floor(time * 14.0)));
+    // Swept chevron panel lines (they point at the nose).
+    float chev = abs(fract((l.x + ay * 1.3) * 0.085) - 0.5);
+    float line = 1.0 - smoothstep(0.03, 0.075, chev);
+    col = mix(col, tint, line * 0.55 * smoothstep(0.5, 2.5, ay));
 
-    vec3 base = mix(fragColor.rgb, tint, 0.35);
-    vec3 col = mix(base, irid, 0.55);
-    col *= 0.75 + 0.55 * plasma;
-    col += vec3(0.35, 0.70, 1.0) * vein * (0.6 + 0.8 * thrust);
-    col += vec3(0.50, 0.80, 1.0) * nose * (0.18 + 0.12 * pulse);
-    col += vec3(1.0) * sparkle * 0.7;
+    // A pulse of light running from the nose to the tail along the spine and the panel lines.
+    float run = pow(0.5 + 0.5 * sin(l.x * 0.22 + ay * 0.15 - time * (4.0 + 6.0 * thrust)), 8.0);
+    col += tint * 1.6 * run * (spine * 0.8 + line * 0.5) * (0.5 + 0.7 * thrust);
+
+    // Thin electric rim on the wing tips and the nose.
+    float rim = smoothstep(7.0, 12.0, ay) + smoothstep(22.0, 33.0, l.x);
+    col += vec3(0.20, 0.45, 1.0) * rim * (0.20 + 0.15 * (0.5 + 0.5 * sin(time * 7.0)));
+
     col = mix(col, vec3(1.0), flash);
     finalColor = vec4(col, fragColor.a);
 }
 `
 
-// Player 1's energy aura: a pulsing halo with two rings of rotating arcs. Drawn additively on a
-// quad around the ship (premultiplication is not needed: rgb is added, weighted by alpha).
-AURA_FS: cstring : `#version 330
+// Player 1's booster trail: a long ion flame drawn on a quad behind each nozzle. It lives in
+// NOZZLE-LOCAL space (x = forward, so the flame streams to -x): a white-hot core fading through
+// electric blue and navy into violet smoke, ragged turbulent edges, shock diamonds and bright
+// ion streaks racing down the flame. Drawn additively (rgb is added, weighted by alpha).
+BOOSTER_FS: cstring : `#version 330
 in vec4 fragColor;
 uniform float time;
-uniform vec2  center;   // framebuffer pixels (origin bottom-left)
-uniform float radius;   // nominal ring radius in pixels
-uniform float thrust;
-uniform vec3  tint;
+uniform vec2  center;   // the nozzle in framebuffer pixels (origin bottom-left)
+uniform float angle;    // ship heading (radians, y-down world)
+uniform float flameLen; // flame length in pixels
+uniform float width;    // flame half-width at the nozzle in pixels
+uniform float thrust;   // 0..1
+uniform float seed;     // decorrelates the three flames
 out vec4 finalColor;
+
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x),
+               mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
 
 void main() {
     vec2 v = gl_FragCoord.xy - center;
-    float d = length(v) / radius;
+    vec2 w = vec2(v.x, -v.y);
+    float ca = cos(angle);
+    float sa = sin(angle);
+    vec2 l = vec2(w.x * ca + w.y * sa, -w.x * sa + w.y * ca);
+
+    float d = -l.x / max(flameLen, 1.0);              // 0 at the nozzle, 1 at the flame tip
+    if (d < -0.12 || d > 1.0) discard;
+
+    // Bell-shaped width: a quick flare right behind the nozzle, then a long taper.
+    float flare = 0.75 + 0.45 * smoothstep(0.0, 0.10, d);
+    float taper = pow(clamp(1.0 - d, 0.0, 1.0), 0.75);
+    float wd = width * flare * taper;
+
+    // Turbulence streaming tail-ward; the flame whips sideways more toward the tip.
+    float speed = 11.0 + 9.0 * thrust;
+    float n  = noise(vec2(d * 7.0 - time * speed * 0.35 + seed, l.y * 0.22 + seed * 3.0));
+    float n2 = noise(vec2(d * 17.0 - time * speed * 0.8 + seed * 2.0, l.y * 0.5 - time * 0.5));
+    float wob = (n - 0.5) * wd * 0.9 * smoothstep(0.1, 0.9, d);
+    float a = abs(l.y + wob) / max(wd, 0.001);       // 0 on the axis, 1 at the flame edge
+
+    float body = (1.0 - smoothstep(0.35, 1.05, a + (n2 - 0.5) * 0.35)) * (1.0 - smoothstep(0.55, 1.0, d + (n - 0.5) * 0.22));
+    float core = (1.0 - smoothstep(0.0, 0.55, a)) * (1.0 - smoothstep(0.0, 0.50, d));
+    float hot  = (1.0 - smoothstep(0.0, 0.22, a)) * (1.0 - smoothstep(0.0, 0.28, d));
+
+    // Colour ramp: white-hot -> electric blue -> navy -> violet smoke at the tip.
+    vec3 navy   = vec3(0.06, 0.14, 0.55);
+    vec3 blue   = vec3(0.15, 0.50, 1.00);
+    vec3 violet = vec3(0.42, 0.18, 0.85);
+    vec3 col = mix(blue, navy, smoothstep(0.15, 0.75, d + a * 0.4));
+    col = mix(col, violet, smoothstep(0.55, 1.0, d) * 0.7);
+    col = mix(col, vec3(0.75, 0.93, 1.0), core * 0.85);
+    col = mix(col, vec3(1.0), hot);
+
+    // Shock diamonds along the axis.
+    float dia = pow(max(0.0, sin(d * 21.0 * (0.6 + 0.4 * flameLen / 90.0) - time * 6.0)), 6.0);
+    float diamonds = dia * (1.0 - smoothstep(0.0, 0.40, a)) * (1.0 - smoothstep(0.05, 0.75, d));
+
+    // Bright ion streaks racing down the flame.
+    float st = noise(vec2(l.y * 0.9 + seed * 5.0, 3.0));
+    float streak = pow(0.5 + 0.5 * sin(d * 34.0 - time * 26.0 + st * 6.28), 10.0)
+                 * step(0.55, st) * (1.0 - smoothstep(0.0, 0.8, a)) * (1.0 - d);
+
+    // A soft glow bleeding past the flame edge, and a bloom right at the nozzle.
+    float halo  = exp(-a * a * 1.6) * (1.0 - d) * 0.35;
+    float bz = (d * flameLen) / (width * 2.4);
+    float bloom = exp(-bz * bz) * exp(-a * a * 0.7) * 0.6;
+
+    float alpha = body * (0.80 + 0.2 * n) + diamonds * 0.55 + streak * 0.6 + halo + bloom;
+    float power = 0.45 + 0.55 * thrust;              // an idling engine glows, a thrusting one blazes
+    alpha = clamp(alpha * power * (0.92 + 0.08 * sin(time * 40.0 + seed)), 0.0, 1.0);
+
+    col += vec3(0.5, 0.75, 1.0) * (diamonds * 0.7 + streak * 0.8);
+    finalColor = vec4(col, alpha);
+}
+`
+
+// Explosion skill: a fireball. A white flash at the centre, billowing flame (turbulent noise
+// pushed outward) that cools from white through yellow and the skill's orange to dark red, a
+// bright shock ring at the front and streaking embers. Output is for ADDITIVE blending.
+EXPLOSION_FS: cstring : `#version 330
+out vec4 finalColor;
+
+uniform vec2  center;     // framebuffer pixels (origin bottom-left)
+uniform float radius;     // current front radius
+uniform float maxRadius;  // full blast radius
+uniform float progress;   // 0 -> 1
+uniform vec3  tint;       // flame colour
+uniform float seed;
+
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x),
+               mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+float fbm(vec2 p) {
+    float v = 0.0;
+    float a = 0.5;
+    for (int i = 0; i < 4; i++) {
+        v += a * noise(p);
+        p = p * 2.03 + vec2(13.0, 7.0);
+        a *= 0.5;
+    }
+    return v;
+}
+
+void main() {
+    vec2 v = gl_FragCoord.xy - center;
+    float d = length(v);
+    vec2 dir = v / max(d, 0.001);
     float ang = atan(v.y, v.x);
+    float fade = 1.0 - progress;
 
-    float r1 = (d - 1.0) / 0.10;
-    float r2 = (d - 1.30) / 0.07;
-    float r3 = d * 1.25;
-    float ring  = exp(-r1 * r1);
-    float arcs  = pow(0.5 + 0.5 * sin(ang * 3.0 + time * 2.5 + sin(time * 1.3) * 2.0), 3.0);
-    float arcs2 = pow(0.5 + 0.5 * sin(ang * 5.0 - time * 3.7), 6.0);
-    float outerArc = exp(-r2 * r2) * arcs2;
-    float bloom = exp(-r3 * r3) * (0.20 + 0.15 * thrust);
+    // Flame turbulence, drifting outward as the blast ages.
+    vec2 q = dir * (d / maxRadius) * 3.0 + vec2(seed * 9.0, seed * 5.0);
+    float turb  = fbm(q * 1.6 - dir * progress * 2.2);
+    float turb2 = fbm(q * 4.2 + vec2(progress * 3.0, -progress * 2.0));
 
-    float a = ring * (0.20 + 0.60 * arcs) + outerArc * 0.85 + bloom;
-    a = clamp(a * (0.75 + 0.25 * sin(time * 6.0)) * (0.85 + 0.35 * thrust), 0.0, 1.0);
+    float rn = d / max(radius, 1.0);                 // 1.0 on the front
+    float rag = (turb - 0.5) * 0.45;                 // ragged edge
+    float body = 1.0 - smoothstep(0.45 + rag, 1.0 + rag * 0.6, rn);
+    float heat = body * (1.25 - 0.85 * rn) * (0.55 + 0.9 * turb2) * (1.0 - 0.7 * progress);
 
-    vec3 col = mix(tint, vec3(0.75, 0.97, 1.0), clamp(arcs2 + 0.25 * outerArc, 0.0, 1.0));
+    // Flame palette: smoke red -> skill colour -> yellow -> white.
+    vec3 col = mix(vec3(0.30, 0.03, 0.01), tint, smoothstep(0.05, 0.45, heat));
+    col = mix(col, vec3(1.0, 0.86, 0.38), smoothstep(0.40, 0.90, heat));
+    col = mix(col, vec3(1.0), smoothstep(0.90, 1.30, heat));
+
+    // The initial flash.
+    float fl = d / (maxRadius * (0.20 + 0.45 * progress));
+    float flash = exp(-fl * fl) * pow(fade, 2.5);
+    col = mix(col, vec3(1.0, 0.97, 0.88), clamp(flash, 0.0, 1.0));
+
+    // Shock ring on the front.
+    float rt = (d - radius) / (5.0 + 12.0 * fade);
+    float ring = exp(-rt * rt);
+    col += vec3(1.0, 0.88, 0.62) * ring * 0.9;
+
+    // Embers: thin radial streaks just behind the front.
+    float cellId = floor(ang * 7.639437);            // 48 rays around the circle
+    float rh = hash(vec2(cellId, seed * 31.0));
+    float rayOn = step(0.72, rh);
+    float rayLen = radius * (0.25 + 0.4 * hash(vec2(cellId, 5.0 + seed)));
+    float ray = rayOn * smoothstep(radius - rayLen, radius, d) * (1.0 - smoothstep(radius, radius + 10.0, d));
+    ray *= 0.5 + 0.5 * hash(vec2(floor(ang * 120.0), floor(progress * 12.0)));
+    col += vec3(1.0, 0.7, 0.3) * ray * 0.9;
+
+    float a = clamp(body * (0.40 + 0.60 * heat) + ring * 0.9 + flash + ray * 0.8, 0.0, 1.0) * pow(fade, 0.7);
     finalColor = vec4(col, a);
 }
 `
@@ -374,13 +492,25 @@ DartShader :: struct {
 	thrust_loc: i32,
 }
 
-AuraShader :: struct {
+BoosterShader :: struct {
 	shader:     rl.Shader,
 	time_loc:   i32,
 	center_loc: i32,
-	radius_loc: i32,
+	angle_loc:  i32,
+	length_loc: i32,
+	width_loc:  i32,
 	thrust_loc: i32,
+	seed_loc:   i32,
+}
+
+ExplosionShader :: struct {
+	shader:     rl.Shader,
+	center_loc: i32,
+	radius_loc: i32,
+	max_loc:    i32,
+	prog_loc:   i32,
 	tint_loc:   i32,
+	seed_loc:   i32,
 }
 
 Shaders :: struct {
@@ -390,7 +520,8 @@ Shaders :: struct {
 	hole:   HoleShader,
 	freeze: FreezeShader,
 	dart:   DartShader,
-	aura:   AuraShader,
+	booster:   BoosterShader,
+	explosion: ExplosionShader,
 }
 
 load_shaders :: proc() -> Shaders {
@@ -400,7 +531,8 @@ load_shaders :: proc() -> Shaders {
 	hs := rl.LoadShaderFromMemory(nil, HOLE_FS)
 	fs := rl.LoadShaderFromMemory(nil, FREEZE_FS)
 	ds := rl.LoadShaderFromMemory(nil, DART_FS)
-	au := rl.LoadShaderFromMemory(nil, AURA_FS)
+	au := rl.LoadShaderFromMemory(nil, BOOSTER_FS)
+	es := rl.LoadShaderFromMemory(nil, EXPLOSION_FS)
 	return Shaders{
 		freeze = FreezeShader{
 			shader     = fs,
@@ -415,13 +547,24 @@ load_shaders :: proc() -> Shaders {
 			angle_loc  = rl.GetShaderLocation(ds, "angle"),
 			thrust_loc = rl.GetShaderLocation(ds, "thrust"),
 		},
-		aura = AuraShader{
+		booster = BoosterShader{
 			shader     = au,
 			time_loc   = rl.GetShaderLocation(au, "time"),
 			center_loc = rl.GetShaderLocation(au, "center"),
-			radius_loc = rl.GetShaderLocation(au, "radius"),
+			angle_loc  = rl.GetShaderLocation(au, "angle"),
+			length_loc = rl.GetShaderLocation(au, "flameLen"),
+			width_loc  = rl.GetShaderLocation(au, "width"),
 			thrust_loc = rl.GetShaderLocation(au, "thrust"),
-			tint_loc   = rl.GetShaderLocation(au, "tint"),
+			seed_loc   = rl.GetShaderLocation(au, "seed"),
+		},
+		explosion = ExplosionShader{
+			shader     = es,
+			center_loc = rl.GetShaderLocation(es, "center"),
+			radius_loc = rl.GetShaderLocation(es, "radius"),
+			max_loc    = rl.GetShaderLocation(es, "maxRadius"),
+			prog_loc   = rl.GetShaderLocation(es, "progress"),
+			tint_loc   = rl.GetShaderLocation(es, "tint"),
+			seed_loc   = rl.GetShaderLocation(es, "seed"),
 		},
 		blast = BlastShader{
 			shader     = bs,
@@ -464,7 +607,8 @@ unload_shaders :: proc(s: Shaders) {
 	rl.UnloadShader(s.hole.shader)
 	rl.UnloadShader(s.freeze.shader)
 	rl.UnloadShader(s.dart.shader)
-	rl.UnloadShader(s.aura.shader)
+	rl.UnloadShader(s.booster.shader)
+	rl.UnloadShader(s.explosion.shader)
 }
 
 // Sets the ice shader's uniforms (call once, then BeginShaderMode(freeze.shader) around the draws).
@@ -486,19 +630,48 @@ set_dart_shader :: proc(s: DartShader, center, shake_off: [2]f32, angle, thrust,
 	rl.SetShaderValue(s.shader, s.thrust_loc, &th, .FLOAT)
 }
 
-// Player 1's aura: a quad around the ship drawn additively through AURA_FS.
-draw_ship_aura :: proc(a: AuraShader, center, shake_off: [2]f32, radius, t, thrust: f32, tint: [3]f32) {
-	c := [2]f32{center.x + shake_off.x, f32(SCREEN_H) - (center.y + shake_off.y)}
-	r, tt, th, tn := radius, t, thrust, tint
-	rl.SetShaderValue(a.shader, a.center_loc, &c, .VEC2)
-	rl.SetShaderValue(a.shader, a.radius_loc, &r, .FLOAT)
-	rl.SetShaderValue(a.shader, a.time_loc, &tt, .FLOAT)
-	rl.SetShaderValue(a.shader, a.thrust_loc, &th, .FLOAT)
-	rl.SetShaderValue(a.shader, a.tint_loc, &tn, .VEC3)
+// One booster flame: a quad around the nozzle drawn additively through BOOSTER_FS.
+// `nozzle` is in canvas pixels (inside the shaken camera); `shake_off` is that camera offset.
+draw_booster :: proc(b: BoosterShader, nozzle, shake_off: [2]f32, angle, length, width, thrust, t, seed: f32) {
+	c := [2]f32{nozzle.x + shake_off.x, f32(SCREEN_H) - (nozzle.y + shake_off.y)}
+	an, ln, wd, th, tt, sd := angle, length, width, thrust, t, seed
+	rl.SetShaderValue(b.shader, b.center_loc, &c, .VEC2)
+	rl.SetShaderValue(b.shader, b.angle_loc, &an, .FLOAT)
+	rl.SetShaderValue(b.shader, b.length_loc, &ln, .FLOAT)
+	rl.SetShaderValue(b.shader, b.width_loc, &wd, .FLOAT)
+	rl.SetShaderValue(b.shader, b.thrust_loc, &th, .FLOAT)
+	rl.SetShaderValue(b.shader, b.time_loc, &tt, .FLOAT)
+	rl.SetShaderValue(b.shader, b.seed_loc, &sd, .FLOAT)
 
-	extent := i32(radius * 1.8)
+	extent := i32(length + width * 3 + 16) // the flame points away from the ship, but the bloom is round
 	rl.BeginBlendMode(.ADDITIVE)
-	rl.BeginShaderMode(a.shader)
+	rl.BeginShaderMode(b.shader)
+	rl.DrawRectangle(i32(nozzle.x) - extent, i32(nozzle.y) - extent, extent * 2, extent * 2, rl.WHITE)
+	rl.EndShaderMode()
+	rl.EndBlendMode()
+}
+
+// The Explosion skill's fireball. progress: 0 at the blast, 1 when it has finished. The front
+// races out fast and slows down (ease-out), like a real blast wave.
+draw_explosion :: proc(e: ExplosionShader, center: [2]f32, progress, max_radius: f32, tint: [3]f32) {
+	c := [2]f32{center.x, f32(SCREEN_H) - center.y}
+	inv := 1.0 - progress
+	radius := max_radius * (1.0 - inv * inv * inv)
+	max_r := max_radius
+	p := progress
+	t := tint
+	sd := f32(int(center.x * 0.37 + center.y * 0.61) % 97) / 97.0
+
+	rl.SetShaderValue(e.shader, e.center_loc, &c, .VEC2)
+	rl.SetShaderValue(e.shader, e.radius_loc, &radius, .FLOAT)
+	rl.SetShaderValue(e.shader, e.max_loc, &max_r, .FLOAT)
+	rl.SetShaderValue(e.shader, e.prog_loc, &p, .FLOAT)
+	rl.SetShaderValue(e.shader, e.tint_loc, &t, .VEC3)
+	rl.SetShaderValue(e.shader, e.seed_loc, &sd, .FLOAT)
+
+	extent := i32(max_radius) + 40
+	rl.BeginBlendMode(.ADDITIVE)
+	rl.BeginShaderMode(e.shader)
 	rl.DrawRectangle(i32(center.x) - extent, i32(center.y) - extent, extent * 2, extent * 2, rl.WHITE)
 	rl.EndShaderMode()
 	rl.EndBlendMode()

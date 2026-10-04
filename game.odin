@@ -47,6 +47,7 @@ reset_level_world :: proc(g: ^Game) {
 	for &k in g.enh_pickups do k.active = false
 	for &k in g.skill_pickups do k.active = false
 	g.freeze_ticks = 0
+	for &p in g.players do p.slow_ticks = 0
 	g.rewind = {} // Come Back only remembers the current level
 	clear_fx(g)
 }
@@ -111,6 +112,7 @@ begin_level_complete :: proc(g: ^Game) {
 	g.portal_open = 0
 	g.boss_warn   = 0
 	g.freeze_ticks = 0
+	for &p in g.players do p.slow_ticks = 0
 	// The arena is now safe. Enhancement pickups are kept so they can still be
 	// collected before entering the portal.
 	for &e in g.enemies do e.active = false

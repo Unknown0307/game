@@ -136,6 +136,7 @@ Player :: struct {
 	visual_timer:  f32,
 	repel_visual:  f32, // seconds left of the Repel shockwave
 	freeze_visual: f32, // seconds left of the Freeze frost wave
+	slow_ticks:    i32, // Freeze aftermath: counts down from FREEZE_DURATION + FREEZE_SLOW_TICKS; slowed once it is <= FREEZE_SLOW_TICKS
 	rewind_visual: f32, // seconds left of the Come Back flash
 	comeback_used: bool, // Come Back may only be used once per level
 	hurt_flash:    f32,
