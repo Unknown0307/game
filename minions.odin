@@ -5,11 +5,11 @@ import "core:math/linalg"
 import rl "vendor:raylib"
 
 // =============================================================================
-// minions.odin - the "Minion" enhancement: an allied drone that looks and fights like a
+// minions.odin - the "Minion" status: an allied drone that looks and fights like a
 // laser cruiser (see gunfire.odin) and follows its summoner.
 //
-//  * One minion per Minion enhancement copy (MAX_ENHANCEMENTS per player at most).
-//  * Its max health is half of the summoner's max health (so Max health enhancements
+//  * One minion per Minion status copy (MAX_STATUSES per player at most).
+//  * Its max health is half of the summoner's max health (so Max health statuses
 //    make it tougher too). It takes damage from enemies, enemy bullets and beams.
 //  * When it dies it stays dead for the rest of the level and resurrects with full health
 //    at the start of the next one (revive_minions, called from advance_level).
@@ -41,7 +41,7 @@ spawn_player_minion :: proc(g: ^Game, owner: i32) {
 	for m in g.minions {
 		if m.exists && m.owner == owner do slot += 1
 	}
-	if slot >= MAX_ENHANCEMENTS do return
+	if slot >= MAX_STATUSES do return
 
 	for &m in g.minions {
 		if m.exists do continue
@@ -194,34 +194,14 @@ enemies_hit_minions :: proc(g: ^Game) {
 	if g.freeze_ticks > 0 do return
 	for &e in g.enemies {
 		if !e.active do continue
-		if e.kind == .Sticky && e.stuck do continue
+		if enemy_inert(e) do continue
 		if e.reflect_ticks > 0 do continue // reflected missiles only hurt the other player
 		for &m in g.minions {
 			if !m.exists || !m.alive do continue
 			epos := closest_wrapped_pos(e, m.pos)
 			if !rl.CheckCollisionCircles(epos, e.radius, m.pos, MINION_RADIUS) do continue
 
-			switch e.kind {
-			case .Boss:
-				if e.hit_cd <= 0 {
-					e.hit_cd = BOSS_HIT_COOLDOWN
-					e.dash_t = 0
-					hurt_minion(g, &m, e.damage)
-					off := epos - m.pos
-					dist := linalg.length(off)
-					if dist > 0.001 do e.pos += off / dist * 120
-				}
-			case .Sticky:
-				e.stuck = true
-				e.stick_ticks = STICKY_STICK_TICKS
-				e.stick_pos = e.pos
-				e.flash = 0.35
-				spawn_burst(g, e.pos, rl.Color{255, 220, 90, 255}, 18, 130, 3)
-			case .Normal, .Runner, .Big, .Minion, .Asteroid:
-				e.active = false
-				hurt_minion(g, &m, e.damage)
-				spawn_burst(g, e.pos, e.color, 8, 150, 3)
-			}
+			enemy_contact(g, &e, &m, epos)
 			if !e.active do break
 		}
 	}

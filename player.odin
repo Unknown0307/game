@@ -6,7 +6,7 @@ import "core:math/rand"
 import rl "vendor:raylib"
 
 // =============================================================================
-// player.odin - players: construction, movement, health, shields, enhancements,
+// player.odin - players: construction, movement, health, shields,
 // and invulnerability checks. (Skills + the gun live in skills.odin.)
 // =============================================================================
 
@@ -87,10 +87,9 @@ player_rect :: proc(p: Player) -> rl.Rectangle {
 	return rl.Rectangle{p.pos.x, p.pos.y, p.size.x, p.size.y}
 }
 
-// Total health: MAX_HEALTH plus 10% of it per "Max health" enhancement.
+// Total health: MAX_HEALTH plus the max_health_bonus of every owned status (see status.odin).
 player_max_health :: proc(p: Player) -> i32 {
-	bonus := MAX_HEALTH_BONUS_PER_COPY * f32(count_enhancement(p, .MaxHealth))
-	return i32(math.round(f32(MAX_HEALTH) * (1.0 + bonus)))
+	return i32(math.round(f32(MAX_HEALTH) * (1.0 + status_max_health_bonus(p))))
 }
 
 // Share of tags a player has left before dying (1.0 = full, 0.0 = dead)
@@ -107,87 +106,6 @@ total_score :: proc(g: ^Game) -> i32 {
 all_players_dead :: proc(g: ^Game) -> bool {
 	for p in g.players {
 		if !p.dead do return false
-	}
-	return true
-}
-
-// --- Enhancements ---
-
-enhancement_name :: proc(kind: EnhancementKind) -> cstring {
-	switch kind {
-	case .Extension: return "EXTENSION +5%"
-	case .Cooldown:  return "COOLDOWN -10%"
-	case .Damage:    return "DAMAGE TAKEN -10%"
-	case .MaxHealth: return "MAX HEALTH +10%"
-	case .Minion:    return "MINION"
-	case .None:      return ""
-	}
-	return ""
-}
-
-enhancement_label :: proc(kind: EnhancementKind) -> cstring {
-	switch kind {
-	case .Extension: return "EXT"
-	case .Cooldown:  return "CD"
-	case .Damage:    return "DMG"
-	case .MaxHealth: return "HP+"
-	case .Minion:    return "MIN"
-	case .None:      return "?"
-	}
-	return "?"
-}
-
-enhancement_color :: proc(kind: EnhancementKind) -> rl.Color {
-	switch kind {
-	case .Extension: return rl.SKYBLUE
-	case .Cooldown:  return rl.GOLD
-	case .Damage:    return rl.VIOLET
-	case .MaxHealth: return rl.Color{255, 100, 120, 255}
-	case .Minion:    return rl.Color{110, 255, 170, 255}
-	case .None:      return rl.Color{190, 210, 255, 255}
-	}
-	return rl.WHITE
-}
-
-random_enhancement_kind :: proc() -> EnhancementKind {
-	all := [5]EnhancementKind{.Extension, .Cooldown, .Damage, .MaxHealth, .Minion}
-	return all[rand.int31_max(i32(len(all)))]
-}
-
-count_enhancement :: proc(p: Player, kind: EnhancementKind) -> i32 {
-	n: i32 = 0
-	for i in 0 ..< p.enhancement_count {
-		if p.enhancements[i] == kind do n += 1
-	}
-	return n
-}
-
-ability_cooldown_multiplier :: proc(p: Player) -> f32 {
-	mult: f32 = 1.0
-	for _ in 0 ..< count_enhancement(p, .Cooldown) do mult *= 0.90
-	return mult
-}
-
-apply_enhancement :: proc(p: ^Player, kind: EnhancementKind) -> bool {
-	if p.enhancement_count >= MAX_ENHANCEMENTS || kind == .None {
-		return false
-	}
-	p.enhancements[p.enhancement_count] = kind
-	p.enhancement_count += 1
-
-	switch kind {
-	case .Extension:
-		p.size *= 1.05
-	case .Cooldown:
-		// Scale the running cooldowns too so the pickup matters immediately.
-		for k in SkillKind do p.skill_cd[k] = i32(f32(p.skill_cd[k]) * 0.90)
-	case .Damage:
-		// Computed dynamically from the stack count in hurt_player.
-	case .MaxHealth:
-		// Computed dynamically (player_max_health): the extra 10% is simply more room before dying.
-	case .Minion:
-		// The drone itself is created by collect_enhancements (it needs the Game).
-	case .None:
 	}
 	return true
 }
@@ -263,9 +181,7 @@ hurt_player :: proc(g: ^Game, p: ^Player, amount: i32) {
 		return
 	}
 
-	reduction: f32 = 1.0
-	for _ in 0 ..< count_enhancement(p^, .Damage) do reduction *= 0.90
-	effective := max(1, i32(math.ceil(f32(amount) * reduction)))
+	effective := max(1, i32(math.ceil(f32(amount) * damage_taken_multiplier(p^))))
 	p.health_points += effective
 	p.hurt_flash = 0.3
 	center := player_center(p^)
@@ -296,7 +212,8 @@ update_player_timers :: proc(p: ^Player, dt: f32) {
 		if p.muzzle_flash[i] > 0 do p.muzzle_flash[i] = max(0, p.muzzle_flash[i] - dt)
 	}
 	// The wheel slices glide toward their target size (taken skill = biggest).
-	for k in SKILLS {
+	for i in 0 ..< SKILL_COUNT {
+		k := skill_at(i)
 		target: f32 = SKILL_WHEEL_BIG if p.skill == k else 1.0
 		p.wheel_w[k] += (target - p.wheel_w[k]) * min(1.0, 12.0 * dt)
 	}
@@ -341,18 +258,23 @@ emit_trail :: proc(g: ^Game, p: ^Player) {
 	face := [2]f32{math.cos(p.angle), math.sin(p.angle)}
 	side := [2]f32{-face.y, face.x}
 	back := c - face * (p.size.x * 0.5)
-	j := rand_vec2()
 
 	switch p.ship {
 	case .Fighter:
-		cols := [2]rl.Color{{150, 220, 255, 255}, {255, 255, 255, 255}}
-		spawn_particle(g, back + j * 2, -face * rand.float32_range(70, 150) + j * 30, cols[rand.int31_max(2)], 0.38, rand.float32_range(2.5, 4.5))
+		// Spear: a stream of blue-white sparks out of the socket.
+		cols := [3]rl.Color{{110, 185, 255, 255}, {200, 235, 255, 255}, {255, 255, 255, 255}}
+		for _ in 0 ..< 3 {
+			jj := rand_vec2()
+			spawn_particle(g, back + jj * 3, -face * rand.float32_range(80, 210) + jj * 40, cols[rand.int31_max(3)], rand.float32_range(0.35, 0.65), rand.float32_range(2.5, 5.5))
+		}
 	case .Interceptor:
-		// Two nacelle jets, alternating lime and amber.
-		sgn: f32 = 1 if rand.int31_max(2) == 0 else -1
-		pos := back + side * (p.size.y * 0.36 * sgn)
-		col := rl.Color{255, 190, 60, 255} if sgn > 0 else rl.Color{150, 255, 120, 255}
-		spawn_particle(g, pos + j * 1.5, -face * rand.float32_range(50, 120) + j * 25, col, 0.42, rand.float32_range(3.0, 5.0))
+		// Hauler: both engine pods puff at once, green on one side and amber on the other.
+		for sgn in ([2]f32{-1, 1}) {
+			jj := rand_vec2()
+			pos := c - face * (p.size.x * 0.6) + side * (p.size.y * 0.275 * sgn)
+			col := rl.Color{255, 190, 60, 255} if sgn < 0 else rl.Color{150, 255, 120, 255}
+			spawn_particle(g, pos + jj * 1.5, -face * rand.float32_range(50, 140) + jj * 25, col, rand.float32_range(0.35, 0.6), rand.float32_range(3.0, 5.5))
+		}
 	}
 }
 

@@ -1,7 +1,5 @@
 package main
 
-import "core:math/rand"
-
 // =============================================================================
 // difficulty.odin - the one place that turns a level number into numbers.
 // Everything scales linearly with t = level - 1 (up to the clamps in config).
@@ -14,10 +12,6 @@ level_params :: proc(level: i32) -> LevelParams {
 	p.level          = level
 	p.speed_mult     = min(BASE_ENEMY_SPEED_MULT + SPEED_MULT_PER_LEVEL * t, MAX_ENEMY_SPEED_MULT)
 	p.spawn_interval = 1.0 / (BASE_SPAWN_RATE + SPAWN_RATE_PER_LEVEL * t)
-
-	p.sticky_chance = min(STICKY_CHANCE_BASE + STICKY_CHANCE_STEP * t, STICKY_CHANCE_MAX)
-	p.big_chance    = min(BIG_CHANCE_BASE + BIG_CHANCE_STEP * t, BIG_CHANCE_MAX)
-	p.runner_chance = min(RUNNER_CHANCE_BASE + RUNNER_CHANCE_STEP * t, RUNNER_CHANCE_MAX)
 
 	p.runner_turn_rate = RUNNER_TURN_RATE_BASE + RUNNER_TURN_RATE_STEP * t
 	p.runner_cone      = min(RUNNER_CONE_BASE + RUNNER_CONE_STEP * t, RUNNER_CONE_MAX)
@@ -38,13 +32,4 @@ level_goal_total :: proc(level: i32) -> i32 {
 	return n * LEVEL_SCORE_BASE + LEVEL_SCORE_GROWTH * (n * (n - 1) / 2)
 }
 
-// Picks which enemy type a regular spawn should be.
-pick_enemy_kind :: proc(p: LevelParams) -> EnemyKind {
-	roll := rand.float32()
-	if roll < p.sticky_chance do return .Sticky
-	roll -= p.sticky_chance
-	if roll < p.big_chance do return .Big
-	roll -= p.big_chance
-	if roll < p.runner_chance do return .Runner
-	return .Normal
-}
+// (Which enemy a regular spawn becomes: pick_enemy_kind in enemy_defs.odin.)

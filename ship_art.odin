@@ -4,16 +4,15 @@ import "core:math"
 import rl "vendor:raylib"
 
 // =============================================================================
-// ship_art.odin - how the two player ships look.
+// ship_art.odin - how the two player ships look. Both use the shared cartoon style
+// (toon.odin): flat colour, dark outline, one glass gem, soft glowing trails.
 //
-//   P1 (Fighter)     "Dart": a long, slim, pointed arrow. Gloss-black plating with navy
-//                    accents (DART_FS), two wing-root guns and a canopy sliver. Its
-//                    engines are the show: a main booster plus two wing-tip boosters,
-//                    drawn by BOOSTER_FS (white-hot core, electric blue -> navy -> violet,
-//                    shock diamonds, ion streaks) over a faint path ribbon.
-//   P2 (Interceptor) "Bulwark": a twin-boom armoured gunship. Heavy plating,
-//                    amber warning stripes, forward gun booms, a spinning
-//                    radar dish and a reactor core with orbiting lights.
+//   P1 (Fighter)     "Spear": the tip of a spear - a leaf-shaped blade with swept barbs
+//                    and a short socket. Blue, two-tone, one cockpit gem. One booster
+//                    flame plus a layered ribbon and glowing puffs as its trail.
+//   P2 (Interceptor) "Hauler": a triangular sci-fi cargo ship - a wedge hull, two stacked
+//                    cargo crates on the back half, a cockpit gem and two engine pods
+//                    with twin ribbons.
 // =============================================================================
 
 ship_pt :: proc(c: [2]f32, x, y, a: f32) -> [2]f32 {
@@ -55,6 +54,24 @@ draw_ribbon :: proc(p: Player, side_off, width: f32, col: rl.Color, alpha: f32, 
 	rl.EndBlendMode()
 }
 
+// Round glowing puffs left along the recent path (cartoon "smoke"), shrinking and fading.
+draw_trail_puffs :: proc(p: Player, side_off, size: f32, col: rl.Color, alpha: f32, max_n: int = PLAYER_TRAIL_LENGTH) {
+	n := min(p.trail_n, max_n)
+	if n < 4 do return
+	rl.BeginBlendMode(.ADDITIVE)
+	for i := 2; i < n - 1; i += 3 {
+		d := p.trail[i + 1] - p.trail[i - 1]
+		l := math.sqrt(d.x * d.x + d.y * d.y)
+		if l < 0.01 do continue
+		nrm := [2]f32{-d.y, d.x} / l
+		k := 1.0 - f32(i) / f32(n)
+		pos := p.trail[i] + nrm * side_off
+		rl.DrawCircleV(pos, size * (0.35 + 0.65 * k), rl.Fade(col, alpha * k))
+		rl.DrawCircleV(pos, size * 0.4 * k, rl.Fade(rl.WHITE, alpha * 0.8 * k))
+	}
+	rl.EndBlendMode()
+}
+
 // Three stacked flame cones (outer colour, inner colour, white core) plus a
 // bloom at the nozzle. x/y/width/length are local pixel offsets.
 draw_plume :: proc(c: [2]f32, a, x, y, width, length: f32, outer, inner: rl.Color) {
@@ -68,12 +85,18 @@ draw_plume :: proc(c: [2]f32, a, x, y, width, length: f32, outer, inner: rl.Colo
 }
 
 // -----------------------------------------------------------------------------
-// P1 - Dart
+// P1 - Spear
 // -----------------------------------------------------------------------------
-DART_NAVY     :: rl.Color{24, 46, 140, 255}  // hull accent
-DART_ELECTRIC :: rl.Color{80, 150, 255, 255} // glows, edges, flashes
+SPEAR_GLOW :: rl.Color{90, 170, 255, 255}
 
-draw_ship_dart :: proc(g: ^Game, p: Player, col: rl.Color, s: f32) {
+// Local outline (x = forward, scaled by half-length; y scaled by half-width). The blade
+// widens to two swept barbs, then narrows to a socket. Star-shaped around the origin.
+SPEAR_HULL :: [9][2]f32{
+	{2.1, 0}, {0.5, -0.55}, {-0.45, -0.7}, {-0.25, -0.22}, {-1.0, -0.22},
+	{-1.0, 0.22}, {-0.25, 0.22}, {-0.45, 0.7}, {0.5, 0.55},
+}
+
+draw_ship_spear :: proc(g: ^Game, p: Player, col: rl.Color, s: f32) {
 	t := g.time
 	c := player_center(p)
 	a := p.angle
@@ -81,224 +104,134 @@ draw_ship_dart :: proc(g: ^Game, p: Player, col: rl.Color, s: f32) {
 	hh := p.size.y * 0.5 * s
 	thr := p.thrust
 
-	navy     := DART_NAVY
-	electric := DART_ELECTRIC
-
-	// The hull is black; the hurt flash (col == white) still turns it white.
+	// The hurt flash (col == white) turns the whole ship white.
 	flashing := col.r == 255 && col.g == 255 && col.b == 255
-	hull := rl.WHITE if flashing else rl.Color{10, 12, 22, 255}
-
-	// Long slim arrow: a needle nose, narrow shoulders, swept wing tips, a shallow tail notch.
-	nose  := ship_pt(c,  hw * 2.30, 0, a)
-	sh_l  := ship_pt(c,  hw * 0.15, -hh * 0.26, a)
-	sh_r  := ship_pt(c,  hw * 0.15,  hh * 0.26, a)
-	tip_l := ship_pt(c, -hw * 1.05, -hh * 0.62, a)
-	tip_r := ship_pt(c, -hw * 1.05,  hh * 0.62, a)
-	notch := ship_pt(c, -hw * 0.62, 0, a)
-
-	// 1. Faint ribbon along the recent path (underneath everything).
-	draw_ribbon(p, 0, hh * 0.55, navy, 0.30)
-	draw_ribbon(p, 0, hh * 0.16, electric, 0.26)
-
-	// 2. Booster trail shader: the main nozzle plus a thin jet off each wing tip.
-	//    Length follows the throttle; an idling ship keeps a short pilot flame.
-	flame := (16 + 76 * thr) * s
-	draw_booster(g.shaders.booster, ship_pt(c, -hw * 0.60, 0, a), g.shake_off, a, flame, hh * (0.26 + 0.08 * thr), thr, t, 0.0)
-	draw_booster(g.shaders.booster, ship_pt(c, -hw * 1.02, -hh * 0.60, a), g.shake_off, a, flame * 0.55, hh * 0.085, thr, t, 1.7)
-	draw_booster(g.shaders.booster, ship_pt(c, -hw * 1.02,  hh * 0.60, a), g.shake_off, a, flame * 0.55, hh * 0.085, thr, t, 3.3)
-
-	// 3. Hull through the black / navy shader (it follows the ship's heading).
-	set_dart_shader(g.shaders.dart, c, g.shake_off, a, thr, t, color_vec(navy))
-	rl.BeginShaderMode(g.shaders.dart.shader)
-	draw_tri_ccw(nose, sh_l, notch, hull)
-	draw_tri_ccw(sh_l, tip_l, notch, hull)
-	draw_tri_ccw(nose, notch, sh_r, hull)
-	draw_tri_ccw(sh_r, notch, tip_r, hull)
-	rl.EndShaderMode()
-
-	// 4. Edges: navy trailing edge, electric pulsing leading edge.
-	trail_edge := rl.Fade(navy, 0.95)
-	rl.DrawLineEx(tip_l, notch, 1.3 * s, trail_edge)
-	rl.DrawLineEx(notch, tip_r, 1.3 * s, trail_edge)
-	pulse := 0.5 + 0.5 * math.sin(t * 6)
-	rl.BeginBlendMode(.ADDITIVE)
-	for pair in ([4][2][2]f32{{nose, sh_l}, {sh_l, tip_l}, {nose, sh_r}, {sh_r, tip_r}}) {
-		rl.DrawLineEx(pair[0], pair[1], 3.0 * s, rl.Fade(electric, 0.10 + 0.14 * pulse))
-		rl.DrawLineEx(pair[0], pair[1], 1.0 * s, rl.Fade(electric, 0.55 + 0.25 * pulse))
+	light := tint_up(col, 0.5)
+	dark  := shade(col, 0.72)
+	if flashing {
+		light = rl.WHITE
+		dark = rl.WHITE
 	}
-	rl.DrawCircleV(nose, 2.0 * s, rl.Fade(rl.WHITE, 0.8))
-	rl.DrawCircleV(tip_l, 2.0 * s, rl.Fade(electric, 0.85))
-	rl.DrawCircleV(tip_r, 2.0 * s, rl.Fade(electric, 0.85))
-	rl.EndBlendMode()
 
-	// 5. Two wing-root gun barrels, with a flash when they fire (the muzzle matches muzzle_local).
+	// 1. Trail: a layered ribbon (wide soft blue -> bright blue -> white core) and puffs.
+	draw_ribbon(p, 0, hh * 0.85, rl.Color{50, 100, 255, 255}, 0.30)
+	draw_ribbon(p, 0, hh * 0.50, SPEAR_GLOW, 0.38)
+	draw_ribbon(p, 0, hh * 0.18, rl.WHITE, 0.55)
+	draw_trail_puffs(p, 0, hh * 0.55, SPEAR_GLOW, 0.55)
+
+	// 2. One booster flame out of the socket (the two thin wing jets are gone).
+	flame := (26 + 90 * thr) * s
+	draw_booster(g.shaders.booster, ship_pt(c, -hw * 0.95, 0, a), g.shake_off, a, flame, hh * (0.36 + 0.10 * thr), thr, t, 0.0)
+
+	// 3. Blade: flat fill, darker lower half, a light glint, ink outline.
+	local := SPEAR_HULL
+	hull: [9][2]f32
+	for q, i in local do hull[i] = ship_pt(c, q.x * hw, q.y * hh, a)
+	draw_fan_ccw(c, hull[:], col)
+
+	lower := [6][2]f32{hull[0], hull[8], hull[7], hull[6], hull[5], ship_pt(c, -hw, 0, a)}
+	draw_fan_ccw(c, lower[:], dark)
+	draw_tri_ccw(ship_pt(c, hw * 1.55, -hh * 0.04, a), ship_pt(c, hw * 0.45, -hh * 0.36, a), ship_pt(c, hw * 0.0, -hh * 0.06, a), light)
+	toon_outline(hull[:])
+	rl.DrawLineEx(ship_pt(c, -hw * 0.62, -hh * 0.22, a), ship_pt(c, -hw * 0.62, hh * 0.22, a), TOON_W, TOON_LINE) // socket band
+
+	// 4. Gun nubs on the barbs' shoulders (muzzle matches muzzle_local), with a flash when firing.
 	for si in 0 ..< 2 {
 		side: f32 = -1 if si == 0 else 1
-		root   := ship_pt(c, -hw * 0.55, side * hh * 0.37, a)
-		muzzle := ship_pt(c,  hw * 0.10, side * hh * 0.37, a)
-		rl.DrawLineEx(root, muzzle, 3.0 * s, rl.Color{8, 10, 18, 255})
-		rl.DrawLineEx(root, muzzle, 1.1 * s, rl.Fade(navy, 1.0))
-		rl.DrawCircleV(muzzle, 1.5 * s, rl.Fade(electric, 0.95))
+		muzzle := ship_pt(c, hw * 0.5, side * hh * 0.55, a)
+		toon_disc(muzzle, hh * 0.17, dark if !flashing else rl.WHITE)
 		if p.muzzle_flash[si] > 0 {
 			k := p.muzzle_flash[si] / 0.09
 			rl.BeginBlendMode(.ADDITIVE)
-			draw_glow(muzzle, hh * (0.3 + 0.35 * k), electric, 0.9)
+			draw_glow(muzzle, hh * (0.3 + 0.35 * k), SPEAR_GLOW, 0.9)
 			rl.DrawCircleV(muzzle, hh * 0.14 * k, rl.WHITE)
 			rl.EndBlendMode()
 		}
 	}
 
-	// 6. Canopy: a dark navy sliver with a glint.
-	cano := [4][2]f32{ship_pt(c, hw * 0.98, 0, a), ship_pt(c, hw * 0.45, hh * 0.13, a), ship_pt(c, -hw * 0.05, 0, a), ship_pt(c, hw * 0.45, -hh * 0.13, a)}
-	draw_quad_ccw(cano[0], cano[1], cano[2], cano[3], rl.Color{4, 8, 26, 255})
-	rl.DrawLineEx(ship_pt(c, hw * 0.85, 0, a), ship_pt(c, hw * 0.30, 0, a), 1.2 * s, rl.Fade(electric, 0.85))
-	rl.DrawCircleV(ship_pt(c, hw * 0.66, -hh * 0.045, a), hh * 0.05, rl.Fade(rl.WHITE, 0.95))
+	// 5. Cockpit gem.
+	toon_gem(ship_pt(c, hw * 0.3, 0, a), hh * 0.24, rl.Color{190, 240, 255, 255})
+
+	// 6. A soft glint at the tip.
+	pulse := 0.5 + 0.5 * math.sin(t * 6)
+	rl.BeginBlendMode(.ADDITIVE)
+	rl.DrawCircleV(hull[0], (1.4 + 0.8 * pulse) * s, rl.Fade(rl.WHITE, 0.7))
+	rl.EndBlendMode()
 }
 
 // -----------------------------------------------------------------------------
-// P2 - Bulwark
+// P2 - Hauler (triangular cargo ship)
 // -----------------------------------------------------------------------------
-draw_ship_bulwark :: proc(g: ^Game, p: Player, col: rl.Color, s: f32) {
+draw_ship_hauler :: proc(g: ^Game, p: Player, col: rl.Color, s: f32) {
 	t := g.time
 	c := player_center(p)
 	a := p.angle
 	u := max(p.size.x, p.size.y) * 0.5 * s
 	thr := p.thrust
 
+	flashing := col.r == 255 && col.g == 255 && col.b == 255
 	amber := rl.Color{255, 176, 40, 255}
-	steel := rl.Color{34, 42, 48, 255}
-
-	// 1. Twin ribbons from the engine nacelles.
-	draw_ribbon(p, -u * 0.72, u * 0.14, amber, 0.32, PLAYER2_TRAIL_LENGTH)
-	draw_ribbon(p, u * 0.72, u * 0.14, col, 0.32, PLAYER2_TRAIL_LENGTH)
-
-	// 2. Engines: one big central burner and two nacelle jets.
-	flick := 0.8 + 0.2 * math.sin(t * 41) + 0.1 * math.sin(t * 67)
-	big   := (6 + 24 * thr) * flick * s
-	small := (4 + 17 * thr) * flick * s
-	draw_plume(c, a, -u * 0.95, 0, u * 0.22, big, col, rl.Color{200, 255, 120, 255})
-	for side in ([2]f32{-1, 1}) {
-		draw_plume(c, a, -u * 0.72, side * u * 0.74, u * 0.12, small, amber, rl.Color{255, 230, 140, 255})
+	crate := rl.Color{255, 200, 80, 255}
+	crate_dark := rl.Color{214, 140, 40, 255}
+	steel := rl.Color{92, 108, 128, 255}
+	dark := shade(col, 0.72)
+	if flashing {
+		crate = rl.WHITE
+		crate_dark = rl.WHITE
+		steel = rl.WHITE
+		dark = rl.WHITE
 	}
 
-	// 3. Geometry (local units, x = forward, y = sideways).
-	pod_local := [7][2]f32{{1.0, 0}, {0.55, -0.40}, {-0.30, -0.48}, {-0.90, -0.30}, {-0.90, 0.30}, {-0.30, 0.48}, {0.55, 0.40}}
-	pod: [7][2]f32
-	for q, i in pod_local do pod[i] = at(c, a, u, q.x, q.y)
+	// 1. Trail: a wide ribbon + puffs off each engine pod (green and amber).
+	// (ribbon side offsets are mirrored: +offset lands on the ship's -y side, where the amber pod is)
+	draw_ribbon(p, u * 0.55, u * 0.30, amber, 0.40, PLAYER2_TRAIL_LENGTH)
+	draw_ribbon(p, -u * 0.55, u * 0.30, col, 0.40, PLAYER2_TRAIL_LENGTH)
+	draw_ribbon(p, u * 0.55, u * 0.10, rl.WHITE, 0.45, PLAYER2_TRAIL_LENGTH)
+	draw_ribbon(p, -u * 0.55, u * 0.10, rl.WHITE, 0.45, PLAYER2_TRAIL_LENGTH)
+	draw_trail_puffs(p, u * 0.55, u * 0.38, amber, 0.5, PLAYER2_TRAIL_LENGTH)
+	draw_trail_puffs(p, -u * 0.55, u * 0.38, col, 0.5, PLAYER2_TRAIL_LENGTH)
 
-	boom: [2][5][2]f32
-	for side, si in ([2]f32{-1, 1}) {
-		boom[si] = {
-			at(c, a, u, -0.65, side * 0.40),
-			at(c, a, u, -0.65, side * 0.98),
-			at(c, a, u,  0.45, side * 0.98),
-			at(c, a, u,  1.20, side * 0.78),
-			at(c, a, u,  0.35, side * 0.55),
+	// 2. Two engine flames (flat cones).
+	flick := 0.85 + 0.15 * math.sin(t * 41) + 0.08 * math.sin(t * 67)
+	flame := (10 + 36 * thr) * flick * s
+	for side in ([2]f32{-1, 1}) {
+		draw_plume(c, a, -u * 1.22, side * u * 0.55, u * 0.17, flame, amber if side < 0 else col, rl.Color{255, 240, 170, 255})
+	}
+
+	// 3. Engine pods behind the hull.
+	for side in ([2]f32{-1, 1}) {
+		toon_quad(at(c, a, u, -0.98, side * 0.55 - 0.2), at(c, a, u, -0.98, side * 0.55 + 0.2), at(c, a, u, -1.24, side * 0.55 + 0.15), at(c, a, u, -1.24, side * 0.55 - 0.15), steel)
+	}
+
+	// 4. Triangle hull: flat fill, darker lower half, outline.
+	hull := [3][2]f32{at(c, a, u, 1.55, 0), at(c, a, u, -1.0, -1.0), at(c, a, u, -1.0, 1.0)}
+	draw_fan_ccw(c, hull[:], col)
+	draw_tri_ccw(hull[0], hull[2], at(c, a, u, -1.0, 0), dark)
+	toon_outline(hull[:])
+
+	// 5. Two stacked cargo crates on the back half.
+	for side in ([2]f32{-1, 1}) {
+		y0 := side * 0.06
+		y1 := side * 0.60
+		toon_quad(at(c, a, u, -0.90, y0), at(c, a, u, -0.90, y1), at(c, a, u, -0.30, y1), at(c, a, u, -0.30, y0), crate)
+		toon_quad(at(c, a, u, -0.90, y0), at(c, a, u, -0.90, y1), at(c, a, u, -0.62, y1), at(c, a, u, -0.62, y0), crate_dark)
+	}
+
+	// 6. Guns on the nose edges (muzzle matches muzzle_local), with a flash when firing.
+	for si in 0 ..< 2 {
+		side: f32 = -1 if si == 0 else 1
+		root   := at(c, a, u, 0.35, side * 0.30)
+		muzzle := at(c, a, u, 0.95, side * 0.30)
+		toon_stroke(root, muzzle, max(2.0, u * 0.13), steel)
+		if p.muzzle_flash[si] > 0 {
+			k := p.muzzle_flash[si] / 0.09
+			rl.BeginBlendMode(.ADDITIVE)
+			draw_glow(muzzle, u * (0.35 + 0.4 * k), amber, 0.9)
+			rl.DrawCircleV(muzzle, u * 0.16 * k, rl.WHITE)
+			rl.EndBlendMode()
 		}
 	}
 
-	// Hull through the energy shader: booms first, then the central pod.
-	set_ship_shader(g.shaders.ship, t, col)
-	rl.BeginShaderMode(g.shaders.ship.shader)
-	for si in 0 ..< 2 {
-		side: f32 = -1 if si == 0 else 1
-		draw_fan_ccw(at(c, a, u, 0.1, side * 0.75), boom[si][:], col)
-	}
-	draw_fan_ccw(c, pod[:], col)
-	rl.EndShaderMode()
-
-	// 4. Plating: dark armoured deck on the pod, shaded boom tops.
-	deck := [5][2]f32{at(c, a, u, 0.72, 0), at(c, a, u, 0.35, -0.24), at(c, a, u, -0.25, -0.30), at(c, a, u, -0.25, 0.30), at(c, a, u, 0.35, 0.24)}
-	draw_fan_ccw(at(c, a, u, 0.1, 0), deck[:], rl.Fade(steel, 0.88))
-	for si in 0 ..< 2 {
-		side: f32 = -1 if si == 0 else 1
-		draw_quad_ccw(at(c, a, u, -0.55, side * 0.55), at(c, a, u, -0.55, side * 0.90), at(c, a, u, 0.35, side * 0.90), at(c, a, u, 0.25, side * 0.60), rl.Fade(shade(col, 0.35), 0.65))
-		// Amber hazard stripes across each boom.
-		for k in 0 ..< 3 {
-			x := -0.42 + f32(k) * 0.34
-			rl.DrawLineEx(at(c, a, u, x, side * 0.52), at(c, a, u, x + 0.14, side * 0.95), 1.7 * s, rl.Fade(amber, 0.9))
-		}
-	}
-
-	// 5. Outlines.
-	edge := rl.Fade(rl.WHITE, 0.5)
-	draw_poly_outline(pod[:], edge)
-	draw_poly_outline(boom[0][:], edge)
-	draw_poly_outline(boom[1][:], edge)
-
-	// 5b. Details: armour seams, rivets, boom nose plates, gun barrels, a chevron emblem on the
-	//     nose, a blinking sensor mast and glowing rear heat vents.
-	seam := rl.Fade(rl.BLACK, 0.55)
-	rl.DrawLineV(at(c, a, u, -0.05, -0.30), at(c, a, u, -0.05, 0.30), seam)
-	rl.DrawLineV(at(c, a, u, 0.48, -0.20), at(c, a, u, 0.48, 0.20), seam)
-	rl.DrawLineV(at(c, a, u, 0.72, 0), at(c, a, u, -0.25, 0), rl.Fade(rl.BLACK, 0.35))
-	for side in ([2]f32{-1, 1}) {
-		rl.DrawLineV(at(c, a, u, -0.20, side * 0.55), at(c, a, u, -0.20, side * 0.98), seam)
-		rl.DrawLineV(at(c, a, u, 0.20, side * 0.55), at(c, a, u, 0.20, side * 0.98), seam)
-		for k in 0 ..< 5 {
-			rl.DrawCircleV(at(c, a, u, -0.55 + f32(k) * 0.26, side * 0.90), max(0.7, u * 0.03), rl.Fade(rl.WHITE, 0.55))
-		}
-		draw_tri_ccw(at(c, a, u, 1.12, side * 0.78), at(c, a, u, 0.58, side * 0.95), at(c, a, u, 0.58, side * 0.62), rl.Fade(rl.Color{86, 100, 112, 255}, 0.9))
-		rl.DrawLineEx(at(c, a, u, 0.95, side * 0.78), at(c, a, u, 1.27, side * 0.78), max(2.0, u * 0.16), rl.Color{18, 22, 26, 255})
-		rl.DrawLineEx(at(c, a, u, 0.95, side * 0.78), at(c, a, u, 1.27, side * 0.78), max(1.0, u * 0.05), rl.Fade(amber, 0.65))
-	}
-	for k in 0 ..< 2 {
-		x := 0.82 - f32(k) * 0.18
-		rl.DrawLineEx(at(c, a, u, x - 0.10, -0.11), at(c, a, u, x + 0.05, 0), 1.5 * s, rl.Fade(amber, 0.9))
-		rl.DrawLineEx(at(c, a, u, x + 0.05, 0), at(c, a, u, x - 0.10, 0.11), 1.5 * s, rl.Fade(amber, 0.9))
-	}
-	mast_tip := at(c, a, u, 1.22, 0)
-	rl.DrawLineEx(at(c, a, u, 0.98, 0), mast_tip, max(1.0, 1.1 * s), rl.Fade(rl.WHITE, 0.8))
-	rl.BeginBlendMode(.ADDITIVE)
-	if math.sin(t * 6.5) > 0.2 do rl.DrawCircleV(mast_tip, max(1.5, u * 0.07), rl.Fade(rl.Color{255, 70, 70, 255}, 0.95))
-	for y in ([3]f32{-0.16, 0, 0.16}) {
-		rl.DrawLineEx(at(c, a, u, -0.74, y), at(c, a, u, -0.88, y), max(1.5, u * 0.06), rl.Fade(rl.Color{255, 120, 40, 255}, 0.25 + 0.55 * thr))
-	}
-	rl.EndBlendMode()
-
-	// 6. Gun muzzles at the boom tips, pulsing.
-	rl.BeginBlendMode(.ADDITIVE)
-	for side in ([2]f32{-1, 1}) {
-		m := 0.5 + 0.5 * math.sin(t * 9 + side * 1.4)
-		rl.DrawCircleV(at(c, a, u, 1.17, side * 0.78), u * (0.10 + 0.04 * m), rl.Fade(amber, 0.55 + 0.4 * m))
-	}
-	for si in 0 ..< 2 {
-		if p.muzzle_flash[si] <= 0 do continue
-		side: f32 = -1 if si == 0 else 1
-		k := p.muzzle_flash[si] / 0.09
-		muzzle := at(c, a, u, 1.17, side * 0.78)
-		draw_glow(muzzle, u * (0.35 + 0.4 * k), amber, 0.9)
-		rl.DrawCircleV(muzzle, u * 0.16 * k, rl.WHITE)
-	}
-	rl.EndBlendMode()
-
-	// 7. Reactor core with three orbiting lights.
-	core := at(c, a, u, 0.12, 0)
-	rl.DrawCircleV(core, u * 0.27, rl.Color{10, 16, 14, 255})
-	rl.DrawCircleLines(i32(core.x), i32(core.y), u * 0.27, rl.Fade(col, 0.9))
-	cpulse := 0.5 + 0.5 * math.sin(t * 5)
-	rl.BeginBlendMode(.ADDITIVE)
-	rl.DrawCircleV(core, u * (0.15 + 0.05 * cpulse), rl.Fade(col, 0.95))
-	rl.DrawCircleV(core, u * 0.07, rl.Fade(rl.WHITE, 0.95))
-	for i in 0 ..< 3 {
-		ang := t * 3.2 + f32(i) * (2.0 * math.PI / 3.0)
-		rl.DrawCircleV(core + rotate_vec({u * 0.36, 0}, ang), u * 0.06, rl.Fade(amber, 0.9))
-	}
-	rl.EndBlendMode()
-
-	// 8. Radar dish: a short sweeping arm on the rear deck.
-	dish := at(c, a, u, -0.55, 0)
-	sweep := t * 5.0
-	off := rotate_vec({u * 0.24, 0}, sweep)
-	arm := ship_pt(dish, off.x, off.y, a)
-	rl.DrawLineEx(dish, arm, 1.6 * s, rl.Fade(rl.WHITE, 0.85))
-	rl.DrawCircleV(dish, u * 0.07, rl.Color{20, 24, 28, 255})
-	rl.DrawCircleV(arm, u * 0.05, rl.Fade(amber, 0.95))
-
-	// 9. Alternating nav lights on the boom rears.
-	blink := math.sin(t * 5) > 0
-	rl.BeginBlendMode(.ADDITIVE)
-	rl.DrawCircleV(at(c, a, u, -0.65, -0.98), 2.2 * s, rl.Fade(rl.Color{255, 80, 80, 255}, 0.95 if blink else 0.2))
-	rl.DrawCircleV(at(c, a, u, -0.65, 0.98), 2.2 * s, rl.Fade(rl.Color{90, 255, 170, 255}, 0.2 if blink else 0.95))
-	rl.EndBlendMode()
+	// 7. Cockpit gem.
+	toon_gem(at(c, a, u, 0.62, 0), u * 0.22, rl.Color{190, 240, 255, 255})
 }

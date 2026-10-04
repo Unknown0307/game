@@ -6,8 +6,8 @@ import "core:math/rand"
 import rl "vendor:raylib"
 
 // =============================================================================
-// enemy.odin - enemy construction, spawning, steering, collisions and kills.
-// Boss-only behaviour lives in boss.odin.
+// enemy.odin - enemy spawning, steering helpers, the update loop, collisions and kills.
+// Per-type behaviour is registered in enemy_defs.odin; boss-only behaviour lives in boss.odin.
 // =============================================================================
 
 alloc_enemy :: proc(g: ^Game) -> ^Enemy {
@@ -20,73 +20,9 @@ alloc_enemy :: proc(g: ^Game) -> ^Enemy {
 count_bosses :: proc(g: ^Game) -> int {
 	n := 0
 	for e in g.enemies {
-		if e.active && e.kind == .Boss do n += 1
+		if e.active && enemy_def(e.kind).is_boss do n += 1
 	}
 	return n
-}
-
-// Builds an enemy of `kind` scaled for the current level.
-make_enemy :: proc(kind: EnemyKind, lp: LevelParams) -> Enemy {
-	e := Enemy{kind = kind, active = true, hp = 1, max_hp = 1, damage = 1, points = 10}
-	mult := lp.speed_mult
-
-	switch kind {
-	case .Normal:
-		e.radius = 12.0
-		e.speed  = rand.float32_range(90.0, 150.0) * mult
-		e.color  = rl.RED
-		e.points = 10
-	case .Runner:
-		e.radius = 8.0
-		e.speed  = rand.float32_range(150.0, 210.0) * mult
-		e.color  = rl.ORANGE
-		e.points = 15
-	case .Big:
-		// Bigger ones are slower, hit harder and are worth more.
-		e.radius = rand.float32_range(20.0, 34.0)
-		e.speed  = (75.0 - (e.radius - 20.0) * 2.5) * mult
-		e.color  = rl.Color{190, 35, 70, 255}
-		e.damage = 2
-		if e.radius >= 27.0 do e.damage = 3
-		e.points = i32(e.radius * 1.5)
-		e.gun_ticks = BIG_SHOOT_COOLDOWN_TICKS + rand.int31_max(21) // don't open fire the instant it spawns
-		e.gun_flip  = rand.int31_max(2) == 0
-		if rand.float32() < BIG_LASER_CHANCE {
-			e.laser = true
-			e.color = rl.Color{35, 140, 190, 255}
-		}
-	case .Sticky:
-		e.radius = 10.0
-		e.speed  = rand.float32_range(42.0, 62.0) * mult
-		e.color  = rl.Color{255, 80, 210, 255}
-		e.damage = STICKY_EXPLOSION_DAMAGE
-		e.points = 25
-	case .Minion:
-		e.radius = 10.0
-		e.speed  = rand.float32_range(140.0, 195.0) * mult
-		e.color  = rl.Color{210, 130, 255, 255}
-		e.points = 12
-	case .Asteroid:
-		e.radius = rand.float32_range(ASTEROID_RADIUS_MIN, ASTEROID_RADIUS_MAX)
-		e.speed  = rand.float32_range(ASTEROID_SPEED_MIN, ASTEROID_SPEED_MAX) * min(mult, 1.3)
-		e.color  = rl.Color{150, 135, 120, 255}
-		e.damage = 2 if e.radius >= 17.0 else 1
-		e.points = ASTEROID_POINTS
-		e.spin   = rand.float32_range(-1.6, 1.6)
-	case .Boss:
-		e.radius = BOSS_RADIUS
-		e.speed  = min(BOSS_BASE_SPEED * mult, PLAYER_MAX_SPEED * BOSS_SPEED_CAP)
-		e.color  = rl.Color{180, 60, 255, 255}
-		e.hp     = lp.boss_hp
-		e.max_hp = lp.boss_hp
-		e.damage = BOSS_DAMAGE
-		e.points = BOSS_SCORE
-		e.can_repel = lp.boss_has_ability
-		e.repel_cd  = BOSS_FIRST_REPEL_DELAY
-		e.summon_cd = BOSS_FIRST_SUMMON_DELAY
-		e.dash_cd   = BOSS_DASH_FIRST_DELAY
-	}
-	return e
 }
 
 // Places a new enemy at an explicit position (used by boss summons).
@@ -174,7 +110,7 @@ nearest_target :: proc(g: ^Game, from: [2]f32, wrap := false) -> (target: [2]f32
 // Bosses wrap around the screen, so they exist at up to 9 positions. This returns
 // the copy of the boss position closest to `point` (other enemies: just pos).
 closest_wrapped_pos :: proc(e: Enemy, point: [2]f32) -> [2]f32 {
-	if e.kind != .Boss do return e.pos
+	if !enemy_def(e.kind).wraps_screen do return e.pos
 	best := e.pos
 	best_d := linalg.length(e.pos - point)
 	for ox in ([3]f32{0, SCREEN_W, -SCREEN_W}) {
@@ -189,8 +125,8 @@ closest_wrapped_pos :: proc(e: Enemy, point: [2]f32) -> [2]f32 {
 	return best
 }
 
-// Seamless screen wrap for the boss: crossing an edge re-enters on the other side.
-wrap_boss :: proc(e: ^Enemy) -> bool {
+// Seamless screen wrap (EnemyDef.wraps_screen): crossing an edge re-enters on the other side.
+wrap_enemy :: proc(e: ^Enemy) -> bool {
 	sw := f32(SCREEN_W)
 	sh := f32(SCREEN_H)
 	before := e.pos
@@ -253,60 +189,18 @@ turn_toward :: proc(cur, want, max_step: f32) -> f32 {
 }
 
 move_enemy :: proc(g: ^Game, e: ^Enemy, dt: f32) {
-	if e.kind == .Asteroid {
-		e.pos += e.heading * e.speed * dt
-		e.angle += e.spin * dt
-		return
-	}
-	wrap := e.kind == .Boss
-	target, _, found := nearest_target(g, e.pos, wrap)
-	if !found do return
-
-	delta := target - e.pos
-	if wrap do delta = wrap_delta(e.pos, target)
-	dist := linalg.length(delta)
-	if dist <= 0.001 do return
-	dir := delta / dist
-	want := math.atan2(dir.y, dir.x)
-
-	switch e.kind {
-	case .Runner, .Minion:
-		steer_runner(e, dir, dt, g.params)
-		e.pos += e.heading * e.speed * dt
-		e.angle = math.atan2(e.heading.y, e.heading.x)
-	case .Boss:
-		e.pos += dir * e.speed * dt
-		e.angle = turn_toward(e.angle, want, 1.8 * dt) // a whale turns slowly
-	case .Normal, .Big, .Sticky:
-		e.pos += dir * e.speed * dt
-		e.angle = turn_toward(e.angle, want, 8.0 * dt)
-	case .Asteroid:
-		// handled in update_enemies (asteroids ignore targets)
-	}
+	move := enemy_def(e.kind).move
+	if move != nil do move(g, e, dt)
 }
 
 outside_play_area :: proc(pos: [2]f32, margin: f32) -> bool {
 	return pos.x < -margin || pos.x > SCREEN_W + margin || pos.y < -margin || pos.y > SCREEN_H + margin
 }
 
-emit_enemy_trail :: proc(g: ^Game, e: Enemy) {
-	switch e.kind {
-	case .Runner:
-		if rand.float32() < 0.5 do spawn_particle(g, epoint(e.pos, e.angle, e.radius, -1.4, 0), {0, 0}, rl.ORANGE, 0.3, 4)
-	case .Minion:
-		if rand.float32() < 0.4 do spawn_particle(g, epoint(e.pos, e.angle, e.radius, -1.3, 0), {0, 0}, e.color, 0.35, 3)
-	case .Sticky:
-		spawn_particle(g, e.pos, {0, 0}, rl.Color{255, 80, 210, 255}, 0.4, 3)
-	case .Boss:
-		jitter := [2]f32{rand.float32_range(-1, 1), rand.float32_range(-1, 1)}
-		spawn_particle(g, e.pos + jitter * (e.radius * 0.6), jitter * 40, rl.Color{255, 60, 60, 255} if e.enraged else rl.Color{255, 90, 200, 255}, 0.5, 6)
-	case .Normal, .Big, .Asteroid:
-	}
-}
-
 update_enemies :: proc(g: ^Game, dt: f32) {
 	for &e in g.enemies {
 		if !e.active do continue
+		def := enemy_def(e.kind)
 		if e.flash > 0  do e.flash -= dt
 
 		// Frozen (Freeze skill): no steering, knock-back, weapons or culling - just a few ice sparkles.
@@ -318,7 +212,8 @@ update_enemies :: proc(g: ^Game, dt: f32) {
 		}
 		if e.hit_cd > 0 do e.hit_cd -= dt
 
-		if e.kind == .Sticky && e.stuck {
+		// Parked enemies (a stuck sticky bomb) stay exactly where they are.
+		if enemy_inert(e) {
 			e.pos = e.stick_pos
 			continue
 		}
@@ -338,23 +233,23 @@ update_enemies :: proc(g: ^Game, dt: f32) {
 		}
 
 		hold := false
-		if e.kind == .Boss do hold = update_boss_ai(g, &e, dt)
+		if def.ai != nil do hold = def.ai(g, &e, dt)
 		if !hold do move_enemy(g, &e, dt)
 
-		if e.kind == .Boss {
+		if def.wraps_screen {
 			before := e.pos
-			if wrap_boss(&e) {
+			if wrap_enemy(&e) {
 				// Warp flash on both sides of the border.
-				spawn_burst(g, before, BOSS_PURPLE, 14, 200, 3)
-				spawn_burst(g, e.pos, BOSS_PURPLE, 14, 200, 3)
+				spawn_burst(g, before, def.wrap_color, 14, 200, 3)
+				spawn_burst(g, e.pos, def.wrap_color, 14, 200, 3)
 			}
 		}
 
-		emit_enemy_trail(g, e)
+		if def.trail != nil do def.trail(g, e)
 
-		// A runner that missed and flew far off-screen would otherwise live forever
+		// Missiles, drones and rocks that flew far off-screen would otherwise live forever
 		// and slowly fill the enemy pool.
-		if (e.kind == .Runner || e.kind == .Minion || e.kind == .Asteroid) && outside_play_area(e.pos, RUNNER_CULL_MARGIN) {
+		if def.cull_offscreen && outside_play_area(e.pos, RUNNER_CULL_MARGIN) {
 			e.active = false
 		}
 	}
@@ -363,32 +258,18 @@ update_enemies :: proc(g: ^Game, dt: f32) {
 // --- Killing ---
 
 kill_enemy :: proc(g: ^Game, e: ^Enemy, killer: ^Player) {
+	def := enemy_def(e.kind)
 	e.active = false
 	killer.kill_count += 1
 	killer.score += e.points
 
-	fk := FloatKind.Score
-	if e.kind == .Boss do fk = .Boss
-	add_float(g, e.pos, e.points, fk)
+	add_float(g, e.pos, e.points, def.score_float)
 	spawn_burst(g, e.pos, e.color, 10 + int(e.radius), 220, 3)
 
-	if e.kind == .Boss {
-		spawn_burst(g, e.pos, rl.GOLD, 80, 420, 5)
-		spawn_burst(g, e.pos, rl.WHITE, 40, 300, 4)
-		add_shake(g, 18)
-		for _ in 0 ..< 8 {
-			spawn_coin_at(g, e.pos + [2]f32{rand.float32_range(-50, 50), rand.float32_range(-50, 50)})
-		}
-		roll_enhancement_drop(g, e.pos, true)
-		roll_skill_drop(g, e.pos, true)
-	} else if e.kind == .Asteroid {
-		// rocks are plentiful on belt levels: no coin / enhancement / skill rolls
-		spawn_burst(g, e.pos, rl.Color{190, 170, 150, 255}, 6, 120, 2.5)
-	} else {
-		if rand.float32() < COIN_DROP_CHANCE do spawn_coin_at(g, e.pos)
-		roll_enhancement_drop(g, e.pos, false)
-		roll_skill_drop(g, e.pos, false)
-	}
+	// Type-specific rewards / effects (default: coin + status + skill rolls).
+	on_death := def.on_death
+	if on_death == nil do on_death = death_default
+	on_death(g, e)
 }
 
 // --- Collisions ---
@@ -413,11 +294,12 @@ explode_sticky_enemy :: proc(g: ^Game, e: ^Enemy) {
 	e.active = false
 }
 
-update_sticky_ticks :: proc(g: ^Game) {
+// Fixed 60 Hz tick for every enemy that has a `tick` hook (fuses and the like).
+update_enemy_ticks :: proc(g: ^Game) {
 	for &e in g.enemies {
-		if !e.active || e.kind != .Sticky || !e.stuck do continue
-		e.stick_ticks -= 1
-		if e.stick_ticks <= 0 do explode_sticky_enemy(g, &e)
+		if !e.active do continue
+		tick := enemy_def(e.kind).tick
+		if tick != nil do tick(g, &e)
 	}
 }
 
@@ -428,7 +310,7 @@ enemy_hits_player :: proc(g: ^Game, p: ^Player, index: i32) {
 
 	for &e in g.enemies {
 		if !e.active do continue
-		if e.kind == .Sticky && e.stuck do continue
+		if enemy_inert(e) do continue
 		if e.reflect_ticks > 0 && e.reflect_owner == index do continue // never hurts who reflected it
 		epos := closest_wrapped_pos(e, player_center(p^))
 		if !rl.CheckCollisionCircleRec(epos, e.radius, rect) do continue
@@ -448,29 +330,7 @@ enemy_hits_player :: proc(g: ^Game, p: ^Player, index: i32) {
 			continue
 		}
 
-		switch e.kind {
-		case .Boss:
-			// The boss isn't consumed: it hurts, then gets knocked back.
-			if e.hit_cd <= 0 {
-				e.hit_cd = BOSS_HIT_COOLDOWN
-				e.dash_t = 0
-				hurt_player(g, p, e.damage)
-				offset := epos - player_center(p^)
-				dist := linalg.length(offset)
-				if dist > 0.001 do e.pos += offset / dist * 120
-			}
-		case .Sticky:
-			// No contact damage: freeze here, wait a few ticks, detonate.
-			e.stuck = true
-			e.stick_ticks = STICKY_STICK_TICKS
-			e.stick_pos = e.pos
-			e.flash = 0.35
-			spawn_burst(g, e.pos, rl.Color{255, 220, 90, 255}, 18, 130, 3)
-		case .Normal, .Runner, .Big, .Minion, .Asteroid:
-			e.active = false
-			hurt_player(g, p, e.damage)
-			spawn_burst(g, e.pos, e.color, 8, 150, 3)
-		}
+		enemy_contact(g, &e, p, epos)
 
 		if p.dead do return
 	}
@@ -485,7 +345,7 @@ enemies_hit_allies :: proc(g: ^Game) {
 			if !a.active do continue
 			if !rl.CheckCollisionCircles(closest_wrapped_pos(e, a.pos), e.radius, a.pos, a.radius) do continue
 
-			if e.kind == .Boss {
+			if enemy_def(e.kind).smashes_allies {
 				a.hp = 0
 			} else {
 				a.hp -= 1

@@ -5,25 +5,39 @@ import rl "vendor:raylib"
 // =============================================================================
 // main.odin - window setup and the frame loop. Nothing game-specific lives here.
 //
-// Project layout (all files are `package main`; build with `odin run .`):
+// Project layout (all files are `package main`; build with `odin run .`).
+// See ARCHITECTURE.md for the registry design and "how to add X" recipes.
+//
+//   main.odin        window + frame loop
 //   config.odin      tunable constants
 //   types.odin       data structures (Game owns all state)
 //   difficulty.odin  level number -> linear difficulty parameters
 //   game.odin        lifecycle, phases, level progression, update loop
-//   player.odin      players, shields, enhancements, damage
-//   skills.odin      skills (explosion, repel, rocket, invisibility, surprise), the gun, skill dice
-//   enemy.odin       enemy creation, steering, collisions, kills
-//   enemy_art.odin   how every enemy looks (ships, rockets, space whales)
-//   ship_art.odin    how the two player ships look (P1 dart, P2 twin-boom gunship)
-//   gunfire.odin     enemy bullets, lasers, mothership raygun, all bullet flight
-//   minions.odin     the Minion enhancement: an allied laser drone that follows its summoner
+//
+//   CONTENT REGISTRIES (describe a thing in one place):
+//   status.odin      statuses (permanent upgrades)      status_def()
+//   skill_defs.odin  skills (wheel abilities)           skill_def()
+//   enemy_defs.odin  enemies (spawn / move / contact / death hooks)  enemy_def()
+//   ally_defs.odin   allies (heal, barrier, ...)        ally_def()
+//
+//   BEHAVIOUR:
+//   player.odin      players, shields, damage
+//   skills.odin      skill behaviours (explosion, repel, ...), the gun, skill dice
+//   enemy.odin       enemy spawning, steering helpers, collisions, kills
 //   boss.odin        boss spawning (whale or mothership), repel + summon behaviour
-//   pickups.odin     coins, allies, enhancement drops
-//   fx.odin          particles, floating text, shake
-//   shaders.odin     GLSL + loaders
-//   style.odin       level palettes, starfield, black hole
-//   backdrop.odin    drifting planets / suns / pulsars / asteroid belts / comets behind the arena
+//   gunfire.odin     enemy bullets, lasers, mothership raygun, all bullet flight
+//   minions.odin     the Minion status: an allied laser drone that follows its summoner
+//   pickups.odin     coins, allies, status drops
+//
+//   LOOK:
+//   enemy_art.odin   how every enemy looks (ships, rockets, space whales) + draw/glow hooks
+//   ship_art.odin    how the two player ships look
 //   render.odin      world drawing
+//   toon.odin        shared cartoon drawing helpers
+//   shaders.odin     shader loaders; GLSL lives in shaders/*.fs
+//   style.odin       level palettes, starfield, black hole
+//   backdrop.odin    drifting planets / suns / pulsars / asteroid belts / comets
+//   fx.odin          particles, floating text, shake
 //   hud.odin         HUD and phase screens
 //   menu.odin        main menu, pause, settings, controls, confirm dialogs
 // =============================================================================

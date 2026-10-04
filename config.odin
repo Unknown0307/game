@@ -16,7 +16,7 @@ MAX_COINS       :: 24
 MAX_ALLIES      :: 4
 MAX_PARTICLES   :: 2000
 MAX_FLOATS      :: 32
-MAX_ENH_PICKUPS :: 6
+MAX_STATUS_PICKUPS :: 6
 PLAYER_COUNT    :: 2
 
 // --- Timing ---
@@ -51,8 +51,8 @@ PLAYER_BULLET_MIN_TURN_RADIUS :: 140.0
 // the way the ship faces). 360 = all around, 90 = a quarter-circle slice.
 PLAYER_AUTOFIRE_ARC_DEG :: 90.0
 PLAYER_BULLET_BOSS_DAMAGE  :: 1
-PLAYER_TRAIL_LENGTH        :: 32     // P1's long fading ribbon (frames of history)
-PLAYER2_TRAIL_LENGTH       :: 14
+PLAYER_TRAIL_LENGTH        :: 44     // P1's long fading ribbon (frames of history)
+PLAYER2_TRAIL_LENGTH       :: 28
 
 // --- Skills: found as dice pickups, one slot each in the player's wheel ---
 // Every timer is in 60 Hz ticks. Seconds are converted with TICK_RATE.
@@ -73,8 +73,8 @@ REPEL_RADIUS_SHIPS       :: 6.0                  // reach AND push distance, in 
 REPEL_VISUAL_TIME        :: 0.4
 SKILL_WHEEL_BIG          :: 3.0                  // wheel weight of the taken skill (others = 1.0)
 
-// --- Skill dice drops (rarer than enhancements) ---
-SKILL_DROP_CHANCE          :: 0.002  // any killed enemy (enhancements: 0.0067)
+// --- Skill dice drops (rarer than statuses) ---
+SKILL_DROP_CHANCE          :: 0.002  // any killed enemy (statuses: 0.0067)
 SKILL_BOSS_DROP_CHANCE     :: 0.25   // boss on a "10th level"
 SKILL_BOSS_LEVEL_INTERVAL  :: 10     // set to BOSS_LEVEL_INTERVAL to let every boss drop one
 SKILL_PICKUP_LIFETIME      :: 20.0
@@ -216,16 +216,16 @@ LASER_WIDTH              :: 7.0
 LASER_DAMAGE             :: 1
 LASER_HIT_INTERVAL_TICKS :: 5     // the beam hurts every 5 ticks (3 hits per shot)
 
-// --- Enhancements ---
-MAX_ENHANCEMENTS              :: 3
-ENHANCEMENT_DROP_CHANCE       :: 0.0067 // any killed enemy
-BOSS_DOUBLE_ENHANCEMENT_CHANCE :: 0.10  // a boss always drops one; 10% for a second
-ENH_PICKUP_LIFETIME           :: 20.0
-ENH_PICKUP_RADIUS             :: 13.0
-MAX_HEALTH_BONUS_PER_COPY     :: 0.10 // "Max health" enhancement: +10% of the base max health per copy
+// --- Statuses ---
+MAX_STATUSES              :: 3
+STATUS_DROP_CHANCE       :: 0.0067 // any killed enemy
+BOSS_DOUBLE_STATUS_CHANCE :: 0.10  // a boss always drops one; 10% for a second
+STATUS_PICKUP_LIFETIME           :: 20.0
+STATUS_PICKUP_RADIUS             :: 13.0
+MAX_HEALTH_BONUS_PER_COPY     :: 0.10 // "Max health" status: +10% of the base max health per copy
 
-// --- "Minion" enhancement: an allied laser drone that follows its summoner ---
-MAX_PLAYER_MINIONS        :: PLAYER_COUNT * MAX_ENHANCEMENTS // one per Minion enhancement copy
+// --- "Minion" status: an allied laser drone that follows its summoner ---
+MAX_PLAYER_MINIONS        :: PLAYER_COUNT * MAX_STATUSES // one per Minion status copy
 MINION_RADIUS             :: 14.0
 MINION_HEALTH_SHARE       :: 0.5    // minion max health = this share of the summoner's max health
 MINION_FOLLOW_DIST        :: 58.0   // orbit distance around the summoner

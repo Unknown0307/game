@@ -299,7 +299,7 @@ draw_controls_page :: proc(g: ^Game) {
 	draw_centered("Explosion, Repel, Rocket, Invisibility, Surprise, Freeze, Come Back.", 384, 17, rl.LIGHTGRAY)
 	draw_centered("Reflected enemies and bullets can hurt the OTHER player!", 406, 17, rl.LIGHTGRAY)
 	draw_centered("Coins add score. Green allies heal, grey allies grant shields.", 432, 17, rl.LIGHTGRAY)
-	draw_centered("Up to 3 enhancements per player: Extension, Cooldown, Damage, Max Health, Minion.", 454, 17, rl.LIGHTGRAY)
+	draw_centered("Up to 3 statuses per player: Extension, Cooldown, Damage, Max Health, Minion.", 454, 17, rl.LIGHTGRAY)
 
 	labels := [?]cstring{"BACK"}
 	draw_menu_items(g, labels[:], 515, 46)

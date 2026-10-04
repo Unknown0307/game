@@ -6,7 +6,8 @@ import "core:math/rand"
 import rl "vendor:raylib"
 
 // =============================================================================
-// pickups.odin - coins, allies and permanent enhancements.
+// pickups.odin - coins, allies and permanent statuses (what each ally does: ally_defs.odin;
+// what each status does: status.odin).
 // =============================================================================
 
 // --- Coins ---
@@ -54,24 +55,19 @@ spawn_ally :: proc(g: ^Game) {
 		if a.active do continue
 
 		ang := rand.float32_range(0, 2 * math.PI)
-		kind := AllyKind.Heal
-		if rand.float32() < BARRIER_ALLY_CHANCE do kind = .Barrier
-
-		hp: i32 = ALLY_HP
-		if kind == .Barrier do hp = 1
+		kind := pick_ally_kind()
+		def := ally_def(kind)
 
 		a = Ally{
 			pos    = {rand.float32_range(60, SCREEN_W - 60), rand.float32_range(130, SCREEN_H - 60)},
 			vel    = [2]f32{math.cos(ang), math.sin(ang)} * rand.float32_range(25, 45),
 			radius = ALLY_RADIUS,
-			hp     = hp,
+			hp     = def.hp,
 			life   = ALLY_LIFETIME,
 			kind   = kind,
 			active = true,
 		}
-		burst_color := rl.LIME
-		if kind == .Barrier do burst_color = SHIELD_COLOR
-		spawn_burst(g, a.pos, burst_color, 20, 120, 3)
+		spawn_burst(g, a.pos, def.glow_color, 20, 120, 3)
 		return
 	}
 }
@@ -84,56 +80,43 @@ count_active_allies :: proc(g: ^Game) -> int {
 	return n
 }
 
-// Touching an ally heals (only if hurt, so heals aren't wasted) or adds a shield.
+// Touching an ally triggers its on_touch hook (see ally_defs.odin); a consumed ally disappears.
 heal_from_allies :: proc(g: ^Game, p: ^Player) {
 	if p.dead do return
 	rect := player_rect(p^)
 	for &a in g.allies {
 		if !a.active || !rl.CheckCollisionCircleRec(a.pos, a.radius, rect) do continue
-
-		if a.kind == .Barrier {
-			add_shield(g, p)
-			a.active = false
-			continue
-		}
-
-		if p.health_points > 0 {
-			healed := min(HEAL_AMOUNT, p.health_points)
-			p.health_points -= healed
-			a.active = false
-			spawn_burst(g, a.pos, rl.LIME, 30, 220, 3.5)
-			spawn_burst(g, player_center(p^), rl.LIME, 20, 140, 3)
-			add_float(g, a.pos, healed, .Heal)
-		}
+		on_touch := ally_def(a.kind).on_touch
+		if on_touch != nil && on_touch(g, p, &a) do a.active = false
 	}
 }
 
-// --- Enhancements ---
-// Dropped by killed enemies: ENHANCEMENT_DROP_CHANCE for any enemy, always one
-// from a boss (plus a BOSS_DOUBLE_ENHANCEMENT_CHANCE for a second).
+// --- Statuses ---
+// Dropped by killed enemies: STATUS_DROP_CHANCE for any enemy, always one
+// from a boss (plus a BOSS_DOUBLE_STATUS_CHANCE for a second).
 
-enhancement_space_available :: proc(g: ^Game) -> bool {
+status_space_available :: proc(g: ^Game) -> bool {
 	for p in g.players {
-		if p.enhancement_count < MAX_ENHANCEMENTS do return true
+		if p.status_count < MAX_STATUSES do return true
 	}
 	return false
 }
 
-any_enhancement_pickup :: proc(g: ^Game) -> bool {
-	for pk in g.enh_pickups {
+any_status_pickup :: proc(g: ^Game) -> bool {
+	for pk in g.status_pickups {
 		if pk.active do return true
 	}
 	return false
 }
 
-spawn_enhancement_pickup :: proc(g: ^Game, pos: [2]f32) {
-	for &pk in g.enh_pickups {
+spawn_status_pickup :: proc(g: ^Game, pos: [2]f32) {
+	for &pk in g.status_pickups {
 		if pk.active do continue
-		pk = EnhancementPickup{
+		pk = StatusPickup{
 			pos    = {clamp(pos.x, 30, SCREEN_W - 30), clamp(pos.y, PLAY_MIN_Y + 15, SCREEN_H - 30)},
-			life   = ENH_PICKUP_LIFETIME,
+			life   = STATUS_PICKUP_LIFETIME,
 			pulse  = rand.float32_range(0, 6.28),
-			kind   = random_enhancement_kind(),
+			kind   = random_status_kind(),
 			active = true,
 		}
 		spawn_burst(g, pk.pos, rl.WHITE, 32, 170, 3)
@@ -141,35 +124,35 @@ spawn_enhancement_pickup :: proc(g: ^Game, pos: [2]f32) {
 	}
 }
 
-roll_enhancement_drop :: proc(g: ^Game, pos: [2]f32, from_boss: bool) {
-	if !enhancement_space_available(g) do return
+roll_status_drop :: proc(g: ^Game, pos: [2]f32, from_boss: bool) {
+	if !status_space_available(g) do return
 
 	count := 0
 	if from_boss {
 		count = 1
-		if rand.float32() < BOSS_DOUBLE_ENHANCEMENT_CHANCE do count = 2
-	} else if rand.float32() < ENHANCEMENT_DROP_CHANCE {
+		if rand.float32() < BOSS_DOUBLE_STATUS_CHANCE do count = 2
+	} else if rand.float32() < STATUS_DROP_CHANCE {
 		count = 1
 	}
 
 	for i in 0 ..< count {
 		offset: [2]f32
 		if count > 1 do offset = {(f32(i) * 2 - 1) * 28, 0} // two pickups sit side by side
-		spawn_enhancement_pickup(g, pos + offset)
+		spawn_status_pickup(g, pos + offset)
 	}
 }
 
 // Each pickup goes to the nearest living player that touches it and has a free slot.
-collect_enhancements :: proc(g: ^Game) {
-	for &pk in g.enh_pickups {
+collect_statuses :: proc(g: ^Game) {
+	for &pk in g.status_pickups {
 		if !pk.active do continue
 
 		collector: ^Player = nil
 		collector_index: i32 = 0
 		best: f32 = math.F32_MAX
 		for &p, pi in g.players {
-			if p.dead || p.enhancement_count >= MAX_ENHANCEMENTS do continue
-			if !rl.CheckCollisionCircleRec(pk.pos, ENH_PICKUP_RADIUS, player_rect(p)) do continue
+			if p.dead || p.status_count >= MAX_STATUSES do continue
+			if !rl.CheckCollisionCircleRec(pk.pos, STATUS_PICKUP_RADIUS, player_rect(p)) do continue
 			d := linalg.length(player_center(p) - pk.pos)
 			if d < best {
 				best = d
@@ -179,10 +162,9 @@ collect_enhancements :: proc(g: ^Game) {
 		}
 		if collector == nil do continue
 
-		if apply_enhancement(collector, pk.kind) {
-			if pk.kind == .Minion do spawn_player_minion(g, collector_index)
+		if apply_status(g, collector, collector_index, pk.kind) {
 			spawn_burst(g, pk.pos, rl.WHITE, 45, 250, 4)
-			add_float(g, player_center(collector^), collector.enhancement_count, .Enhancement)
+			add_float(g, player_center(collector^), collector.status_count, .Status)
 			pk.active = false
 		}
 	}
@@ -198,9 +180,9 @@ update_pickups :: proc(g: ^Game, dt: f32) {
 		if c.life <= 0 do c.active = false
 	}
 
-	// Enhancement pickups pause their timer on the portal screen so players can
+	// Status pickups pause their timer on the portal screen so players can
 	// still grab them before leaving the level.
-	for &pk in g.enh_pickups {
+	for &pk in g.status_pickups {
 		if !pk.active do continue
 		pk.pulse += dt
 		if g.phase != .LevelComplete && g.phase != .Sucking {

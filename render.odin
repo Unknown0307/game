@@ -38,35 +38,17 @@ draw_glows :: proc(g: ^Game) {
 	for a in g.allies {
 		if !a.active do continue
 		pulse := 0.5 + 0.5 * math.sin(a.pulse * 4)
-		col := rl.LIME
-		if a.kind == .Barrier do col = SHIELD_COLOR
-		draw_glow(a.pos, 36 + pulse * 8, col, 0.35 + 0.15 * pulse)
+		draw_glow(a.pos, 36 + pulse * 8, ally_def(a.kind).glow_color, 0.35 + 0.15 * pulse)
 	}
 	for e in g.enemies {
 		if !e.active do continue
+		def := enemy_def(e.kind)
 		if frozen {
 			// Frozen things glow a steady icy blue instead of their own colour.
-			draw_glow(e.pos, e.radius * (2.0 if e.kind == .Boss else 1.7), rl.Color{140, 200, 255, 255}, 0.30)
+			draw_glow(e.pos, e.radius * (2.0 if def.is_boss else 1.7), rl.Color{140, 200, 255, 255}, 0.30)
 			continue
 		}
-		switch e.kind {
-		case .Boss:
-			pulse := 0.5 + 0.5 * math.sin(t * (14 if e.enraged else 8))
-			gcol := rl.Color{255, 60, 200, 255}
-			if e.enraged do gcol = rl.Color{255, 50, 40, 255}
-			draw_glow(e.pos, e.radius * (2.4 if e.enraged else 2.0) + pulse * 10, gcol, 0.55 if e.enraged else 0.45)
-		case .Big:
-			gcol := rl.RED
-			if e.laser do gcol = LASER_COLOR
-			draw_glow(e.pos, e.radius * 1.6, gcol, 0.2)
-		case .Sticky:
-			scale: f32 = 1.3
-			if e.stuck do scale = 1.8
-			draw_glow(e.pos, e.radius * scale, rl.Color{255, 80, 210, 255}, 0.28)
-		case .Minion:
-			draw_glow(e.pos, e.radius * 1.8, rl.Color{200, 120, 255, 255}, 0.18)
-		case .Normal, .Runner, .Asteroid:
-		}
+		if def.glow != nil do def.glow(g, e, t)
 	}
 	for p in g.players {
 		if !p.dead do draw_glow(player_center(p), (42 + 8 * p.thrust) * (1 - p.shrink), p.color, 0.3)
@@ -103,8 +85,8 @@ draw_player :: proc(g: ^Game, p: Player) {
 	}
 	if visible {
 		switch p.ship {
-		case .Fighter:     draw_ship_dart(g, p, col, s)
-		case .Interceptor: draw_ship_bulwark(g, p, col, s)
+		case .Fighter:     draw_ship_spear(g, p, col, s)
+		case .Interceptor: draw_ship_hauler(g, p, col, s)
 		}
 	}
 	if ghost {
@@ -157,8 +139,9 @@ draw_coins :: proc(g: ^Game) {
 		w := max(abs(math.cos(c.spin)) * COIN_RADIUS, 1.5)
 		cx := i32(c.pos.x)
 		cy := i32(c.pos.y)
+		rl.DrawEllipse(cx, cy, w + 1.6, COIN_RADIUS + 1.6, TOON_LINE)
 		rl.DrawEllipse(cx, cy, w, COIN_RADIUS, rl.GOLD)
-		rl.DrawEllipse(cx, cy, w * 0.6, COIN_RADIUS * 0.6, rl.YELLOW)
+		rl.DrawEllipse(cx, cy, w * 0.55, COIN_RADIUS * 0.55, rl.YELLOW)
 	}
 }
 
@@ -167,23 +150,12 @@ draw_allies :: proc(g: ^Game) {
 		if !a.active do continue
 		if a.life < 3 && int(a.life * 8) % 2 == 0 do continue
 
-		col := rl.Color{60, 220, 100, 255}
-		if a.kind == .Barrier do col = rl.Color{190, 198, 210, 255}
+		def := ally_def(a.kind)
+		col := def.body_color
 		if a.flash > 0 do col = rl.Color{255, 120, 120, 255}
 
-		ax, ay := i32(a.pos.x), i32(a.pos.y)
-		rl.DrawCircleV(a.pos, a.radius, col)
-		rl.DrawCircleLines(ax, ay, a.radius, rl.WHITE)
-		if a.kind == .Barrier {
-			rl.DrawCircleLines(ax, ay, a.radius * 0.55, rl.WHITE)
-			rl.DrawLine(ax - 5, ay, ax + 5, ay, rl.WHITE)
-			rl.DrawLine(ax, ay - 5, ax, ay + 5, rl.WHITE)
-		} else {
-			arm := a.radius * 0.7
-			th := a.radius * 0.28
-			rl.DrawRectangleV(a.pos - [2]f32{arm, th}, [2]f32{arm * 2, th * 2}, rl.WHITE)
-			rl.DrawRectangleV(a.pos - [2]f32{th, arm}, [2]f32{th * 2, arm * 2}, rl.WHITE)
-		}
+		toon_disc(a.pos, a.radius, col)
+		if def.draw_icon != nil do def.draw_icon(a)
 		for i in 0 ..< int(a.hp) {
 			px := a.pos.x + (f32(i) - f32(a.hp - 1) / 2) * 8
 			rl.DrawCircleV([2]f32{px, a.pos.y - a.radius - 8}, 2.5, rl.LIME)
@@ -191,24 +163,24 @@ draw_allies :: proc(g: ^Game) {
 	}
 }
 
-draw_enhancement_pickups :: proc(g: ^Game) {
+draw_status_pickups :: proc(g: ^Game) {
 	t := g.time
-	for pk in g.enh_pickups {
+	for pk in g.status_pickups {
 		if !pk.active do continue
 		// Blink during the last 3 seconds before it vanishes.
 		if pk.life < 3 && g.phase != .LevelComplete && g.phase != .Sucking && int(pk.life * 8) % 2 == 0 do continue
 
 		p := pk.pos
 		pulse := 1.0 + 0.14 * math.sin(t * 6.0 + pk.pulse)
-		col := enhancement_color(pk.kind)
-		label := enhancement_label(pk.kind)
+		col := status_color(pk.kind)
+		label := status_label(pk.kind)
 
 		rl.BeginBlendMode(.ADDITIVE)
 		draw_glow(p, 36 * pulse, col, 0.55)
 		rl.EndBlendMode()
-		rl.DrawCircleV(p, 12 * pulse, rl.Color{24, 28, 40, 245})
-		rl.DrawCircleLines(i32(p.x), i32(p.y), 12 * pulse, col)
-		rl.DrawCircleLines(i32(p.x), i32(p.y), 7, rl.Fade(rl.WHITE, 0.55))
+		rl.DrawCircleV(p, 14 * pulse, TOON_LINE)
+		rl.DrawCircleV(p, 12 * pulse, col)
+		rl.DrawCircleV(p, 9 * pulse, rl.Color{24, 28, 40, 255})
 		rl.DrawText(label, i32(p.x) - rl.MeasureText(label, 11) / 2, i32(p.y) - 6, 11, rl.WHITE)
 	}
 }
@@ -262,7 +234,7 @@ draw_boss_extras :: proc(g: ^Game, e: Enemy) {
 draw_entities :: proc(g: ^Game) {
 	draw_coins(g)
 	draw_allies(g)
-	draw_enhancement_pickups(g)
+	draw_status_pickups(g)
 	draw_enemies(g)
 	if g.freeze_ticks <= 0 { // frozen weapons are switched off
 		draw_lasers(g)
@@ -307,8 +279,8 @@ draw_floaters :: proc(g: ^Game) {
 			text = "SHIELD"
 			color = SHIELD_COLOR
 			size = 15
-		case .Enhancement:
-			text = fmt.ctprintf("ENH %d/%d", f.value, MAX_ENHANCEMENTS)
+		case .Status:
+			text = fmt.ctprintf("STATUS %d/%d", f.value, MAX_STATUSES)
 			color = rl.SKYBLUE
 			size = 15
 		case .Skill:

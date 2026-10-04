@@ -11,7 +11,7 @@ ShipStyle :: enum {
 	Interceptor,
 }
 
-EnhancementKind :: enum {
+StatusKind :: enum {
 	None,
 	Extension, // player body size +5%
 	Cooldown,  // ability cooldown -10% per copy
@@ -20,19 +20,18 @@ EnhancementKind :: enum {
 	Minion,    // spawns an allied laser drone with half of your max health
 }
 
-// Skills are separate from enhancements: found as dice, kept in a wheel.
+// Skills are separate from statuses: found as dice, kept in a wheel.
 SkillKind :: enum {
 	None,
+	// The order below is the HUD wheel order.
 	Explosion,    // the old repel blast
+	Repel,        // 3 s cooldown: shoves every projectile, enemy and the other player 6 ship sizes away
 	Rocket,       // gun fires rockets (small blast) while this skill is the taken one
 	Invisibility, // invulnerable for 5 s
 	Surprise,     // 40 ticks: everything that touches you is reflected, you take no damage
-	Repel,        // 3 s cooldown: shoves every projectile, enemy and the other player 6 ship sizes away
 	Freeze,       // everything except the players freezes for 3 s; 30 s cooldown after the thaw
 	ComeBack,     // teleports you (and your minions) back to where you were 5 s ago, health included; once per level
 }
-
-SKILLS :: [7]SkillKind{.Explosion, .Repel, .Rocket, .Invisibility, .Surprise, .Freeze, .ComeBack}
 
 // What the boss looks like (the whale is the original; the mothership shoots).
 BossSkin :: enum {
@@ -60,7 +59,7 @@ FloatKind :: enum {
 	Coin,
 	Heal,
 	Shield,
-	Enhancement,
+	Status,
 	Skill,
 	Boss,
 }
@@ -147,8 +146,8 @@ Player :: struct {
 	trail:         [PLAYER_TRAIL_LENGTH][2]f32, // recent centre positions, newest first (ship ribbon)
 	trail_n:       int,
 	shield_ticks:  [MAX_SHIELDS]i32,
-	enhancements:  [MAX_ENHANCEMENTS]EnhancementKind,
-	enhancement_count: i32,
+	statuses:  [MAX_STATUSES]StatusKind,
+	status_count: i32,
 }
 
 Enemy :: struct {
@@ -228,11 +227,11 @@ Ally :: struct {
 	active:   bool,
 }
 
-EnhancementPickup :: struct {
+StatusPickup :: struct {
 	pos:    [2]f32,
 	life:   f32,
 	pulse:  f32,
-	kind:   EnhancementKind,
+	kind:   StatusKind,
 	active: bool,
 }
 
@@ -243,16 +242,16 @@ SkillPickup :: struct {
 	active: bool,
 }
 
-// The Minion enhancement: an allied drone that looks like a laser cruiser and fights for its summoner.
+// The Minion status: an allied drone that looks like a laser cruiser and fights for its summoner.
 PlayerMinion :: struct {
-	exists:      bool,   // slot in use (one minion per Minion enhancement copy)
+	exists:      bool,   // slot in use (one minion per Minion status copy)
 	alive:       bool,   // false = dead; it resurrects at the start of the next level
 	owner:       i32,    // player index
-	slot:        i32,    // which of the owner's minions this is (0..MAX_ENHANCEMENTS-1)
+	slot:        i32,    // which of the owner's minions this is (0..MAX_STATUSES-1)
 	pos:         [2]f32,
 	angle:       f32,
 	taken:       i32,    // damage taken (same scheme as Player.health_points)
-	max_hp:      i32,    // half of the owner's max health (follows the owner's Max health enhancements)
+	max_hp:      i32,    // half of the owner's max health (follows the owner's Max health statuses)
 	flash:       f32,
 	hit_cd:      f32,    // boss contact cooldown
 	gun_ticks:   i32,    // ticks until the next beam
@@ -271,7 +270,7 @@ RewindMinion :: struct {
 RewindSnap :: struct {
 	pos:           [2]f32,
 	health_points: i32,
-	minions:       [MAX_ENHANCEMENTS]RewindMinion,
+	minions:       [MAX_STATUSES]RewindMinion,
 }
 
 RewindBuffer :: struct {
@@ -317,9 +316,6 @@ LevelParams :: struct {
 	level:          i32,
 	speed_mult:     f32,
 	spawn_interval: f32,
-	sticky_chance:  f32,
-	big_chance:     f32,
-	runner_chance:  f32,
 	runner_turn_rate: f32,
 	runner_cone:    f32,
 	is_boss_level:  bool,
@@ -375,7 +371,7 @@ Game :: struct {
 	allies:      [MAX_ALLIES]Ally,
 	bullets:     [MAX_BULLETS]Bullet,
 	coins:       [MAX_COINS]Coin,
-	enh_pickups: [MAX_ENH_PICKUPS]EnhancementPickup,
+	status_pickups: [MAX_STATUS_PICKUPS]StatusPickup,
 	skill_pickups: [MAX_SKILL_PICKUPS]SkillPickup,
 	fx:          Fx,
 	shaders:     Shaders,

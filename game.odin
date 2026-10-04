@@ -44,7 +44,7 @@ reset_level_world :: proc(g: ^Game) {
 	for &c in g.coins       do c.active = false
 	for &a in g.allies      do a.active = false
 	for &b in g.bullets     do b.active = false
-	for &k in g.enh_pickups do k.active = false
+	for &k in g.status_pickups do k.active = false
 	for &k in g.skill_pickups do k.active = false
 	g.freeze_ticks = 0
 	for &p in g.players do p.slow_ticks = 0
@@ -113,7 +113,7 @@ begin_level_complete :: proc(g: ^Game) {
 	g.boss_warn   = 0
 	g.freeze_ticks = 0
 	for &p in g.players do p.slow_ticks = 0
-	// The arena is now safe. Enhancement pickups are kept so they can still be
+	// The arena is now safe. Status pickups are kept so they can still be
 	// collected before entering the portal.
 	for &e in g.enemies do e.active = false
 	for &c in g.coins   do c.active = false
@@ -159,7 +159,7 @@ update_level_complete :: proc(g: ^Game, dt: f32) {
 	// physically enter it.
 	g.portal_open = min(1.0, g.portal_open + dt / PORTAL_OPEN_TIME)
 	feed_black_hole(g, dt, 0.35 * g.portal_open)
-	collect_enhancements(g)
+	collect_statuses(g)
 	collect_skill_pickups(g)
 	if all_surviving_players_in_portal(g) do begin_sucking(g)
 }
@@ -351,7 +351,7 @@ update_ticks :: proc(g: ^Game, dt: f32) {
 			g.freeze_ticks -= 1
 		} else {
 			tick_reflected_enemies(g)
-			update_sticky_ticks(g)
+			update_enemy_ticks(g)
 			update_enemy_guns(g)
 		}
 		tick_player_minions(g)
@@ -369,7 +369,7 @@ resolve_collisions :: proc(g: ^Game) {
 		collect_coins(g, &p)
 		heal_from_allies(g, &p)
 	}
-	collect_enhancements(g)
+	collect_statuses(g)
 	collect_skill_pickups(g)
 }
 

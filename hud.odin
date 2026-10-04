@@ -55,11 +55,11 @@ draw_player_bar :: proc(x, y, w, h: i32, p: Player) {
 	}
 }
 
-draw_enhancement_slots :: proc(p: Player, x, y: i32, right_align: bool) {
-	label := fmt.ctprintf("ENH %d/%d", p.enhancement_count, MAX_ENHANCEMENTS)
+draw_status_slots :: proc(p: Player, x, y: i32, right_align: bool) {
+	label := fmt.ctprintf("STATUS %d/%d", p.status_count, MAX_STATUSES)
 	slot_w: i32 = 28
 	slot_gap: i32 = 4
-	slots_width := i32(MAX_ENHANCEMENTS) * slot_w + i32(MAX_ENHANCEMENTS - 1) * slot_gap
+	slots_width := i32(MAX_STATUSES) * slot_w + i32(MAX_STATUSES - 1) * slot_gap
 
 	slots_x := x
 	if right_align do slots_x = x - slots_width
@@ -67,15 +67,15 @@ draw_enhancement_slots :: proc(p: Player, x, y: i32, right_align: bool) {
 	draw_text_aligned(label, x, y, 13, rl.Fade(rl.LIGHTGRAY, 0.85), right_align)
 
 	slot_y := y + 16
-	for i in 0 ..< MAX_ENHANCEMENTS {
+	for i in 0 ..< MAX_STATUSES {
 		ii := i32(i)
 		sx := slots_x + ii * (slot_w + slot_gap)
 		rl.DrawRectangleLines(sx, slot_y, slot_w, 24, rl.Fade(rl.WHITE, 0.35))
-		if ii >= p.enhancement_count do continue
+		if ii >= p.status_count do continue
 
-		kind := p.enhancements[i]
-		tag := enhancement_label(kind)
-		rl.DrawRectangle(sx + 2, slot_y + 2, slot_w - 4, 20, rl.Fade(enhancement_color(kind), 0.32))
+		kind := p.statuses[i]
+		tag := status_label(kind)
+		rl.DrawRectangle(sx + 2, slot_y + 2, slot_w - 4, 20, rl.Fade(status_color(kind), 0.32))
 		rl.DrawText(tag, sx + (slot_w - rl.MeasureText(tag, 10)) / 2, slot_y + 7, 10, rl.WHITE)
 	}
 }
@@ -89,21 +89,6 @@ draw_enhancement_slots :: proc(p: Player, x, y: i32, right_align: bool) {
 WHEEL_INNER :: 20.0
 WHEEL_OUTER :: 43.0
 
-// Cooldown progress of a skill, 0 (just used) .. 1 (ready).
-skill_progress :: proc(p: Player, kind: SkillKind) -> f32 {
-	if kind == .Rocket {
-		if p.skill != .Rocket do return 1
-		return 1 - f32(p.fire_cd) / f32(skill_cooldown(p, ROCKET_COOLDOWN_TICKS))
-	}
-	if kind == .ComeBack { // once per level: no timer, either ready or used
-		if p.comeback_used do return 0
-		return 1
-	}
-	cd := p.skill_cd[kind]
-	if cd <= 0 do return 1
-	return clamp(1 - f32(cd) / f32(skill_total_cooldown(p, kind)), 0, 1)
-}
-
 draw_skill_wheel :: proc(p: Player, right_align: bool) {
 	cx := f32(UI_MARGIN) + 48
 	face_deg: f32 = -45 // the taken slice points toward the middle of the screen
@@ -113,18 +98,17 @@ draw_skill_wheel :: proc(p: Player, right_align: bool) {
 	}
 	center := [2]f32{cx, f32(SCREEN_H) - 58}
 
-	order := SKILLS
 	total: f32 = 0
-	for k in order do total += p.wheel_w[k]
-	sizes: [len(SKILLS)]f32
-	for k, i in order do sizes[i] = p.wheel_w[k] / total * 360
+	for i in 0 ..< SKILL_COUNT do total += p.wheel_w[skill_at(i)]
+	sizes: [SKILL_COUNT]f32
+	for i in 0 ..< SKILL_COUNT do sizes[i] = p.wheel_w[skill_at(i)] / total * 360
 
 	// Rotate the wheel so the taken slice is centred on face_deg.
 	start := face_deg - 45
 	if p.skill != .None {
 		before: f32 = 0
-		for k, i in order {
-			if k == p.skill {
+		for i in 0 ..< SKILL_COUNT {
+			if skill_at(i) == p.skill {
 				start = face_deg - (before + sizes[i] * 0.5)
 				break
 			}
@@ -134,7 +118,8 @@ draw_skill_wheel :: proc(p: Player, right_align: bool) {
 
 	rl.DrawCircleV(center, WHEEL_OUTER + 6, rl.Fade(rl.BLACK, 0.45))
 	cum: f32 = 0
-	for k, i in order {
+	for i in 0 ..< SKILL_COUNT {
+		k := skill_at(i)
 		a0 := start + cum + 1.5
 		a1 := start + cum + sizes[i] - 1.5
 		cum += sizes[i]
@@ -178,44 +163,7 @@ draw_skill_wheel :: proc(p: Player, right_align: bool) {
 		return
 	}
 
-	status: cstring
-	scol := rl.LIGHTGRAY
-	switch {
-	case p.skill == .Rocket:
-		if p.fire_cd > 0 {
-			status = fmt.ctprintf("%.1fs", f32(p.fire_cd) / TICK_RATE)
-		} else if p.skill_aim {
-			status = "AUTO-AIM"
-		} else {
-			status = "MANUAL AIM"
-		}
-	case p.skill == .Invisibility && p.invis_ticks > 0:
-		status = fmt.ctprintf("INVISIBLE %.1fs", f32(p.invis_ticks) / TICK_RATE)
-		scol = skill_color(.Invisibility)
-	case p.skill == .Surprise && p.surprise_ticks > 0:
-		status = "REFLECTING!"
-		scol = skill_color(.Surprise)
-	case p.skill == .ComeBack:
-		if p.comeback_used {
-			status = "USED THIS LEVEL"
-			scol = rl.Fade(rl.LIGHTGRAY, 0.7)
-		} else {
-			status = p.ready_text
-			scol = rl.WHITE
-		}
-	case p.skill == .Freeze && p.skill_cd[.Freeze] > skill_cooldown(p, FREEZE_COOLDOWN_TICKS):
-		// still inside the 3 s freeze: the 30 s cooldown has not started yet
-		status = fmt.ctprintf("FROZEN %.1fs", f32(p.skill_cd[.Freeze] - skill_cooldown(p, FREEZE_COOLDOWN_TICKS)) / TICK_RATE)
-		scol = skill_color(.Freeze)
-	case p.skill == .Freeze && player_slowed(p):
-		status = fmt.ctprintf("SLOWED %.1fs", f32(p.slow_ticks) / TICK_RATE)
-		scol = skill_color(.Freeze)
-	case p.skill_cd[p.skill] > 0:
-		status = fmt.ctprintf("%.1fs", f32(p.skill_cd[p.skill]) / TICK_RATE)
-	case:
-		status = p.ready_text
-		scol = rl.WHITE
-	}
+	status, scol := skill_status_text(p)
 	draw_text_aligned(skill_name(p.skill), tx, ty, 16, skill_color(p.skill), right_align)
 	draw_text_aligned(status, tx, ty + 20, 14, scol, right_align)
 }
@@ -237,7 +185,7 @@ draw_player_hud :: proc(p: Player, right_align: bool) {
 	draw_text_aligned(fmt.ctprintf("%s Kills: %d%s", p.name, p.kill_count, status), x, 35, 18, p.hud_color, right_align)
 	draw_player_bar(bar_x, 60, BAR_W, BAR_H, p)
 	draw_text_aligned(fmt.ctprintf("Score: %d | Coins: %d | Shields: %d/%d", p.score, p.coins, shield_count(p), MAX_SHIELDS), x, 82, 16, rl.GOLD, right_align)
-	draw_enhancement_slots(p, x, 103, right_align)
+	draw_status_slots(p, x, 103, right_align)
 }
 
 draw_center_hud :: proc(g: ^Game) {
@@ -321,8 +269,8 @@ draw_level_complete :: proc(g: ^Game) {
 	if any_skill_pickup(g) {
 		draw_centered("Skill die dropped - collect it before entering the black hole", 465, 15, rl.WHITE)
 	}
-	if any_enhancement_pickup(g) {
-		draw_centered("Enhancement dropped - collect it before entering the black hole", 485, 15, rl.WHITE)
+	if any_status_pickup(g) {
+		draw_centered("Status dropped - collect it before entering the black hole", 485, 15, rl.WHITE)
 	}
 
 	alive, here := 0, 0

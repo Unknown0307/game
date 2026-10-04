@@ -6,7 +6,8 @@ import "core:math/rand"
 import rl "vendor:raylib"
 
 // =============================================================================
-// skills.odin - the skill system (separate from enhancements) and the players' gun.
+// skills.odin - what the skills DO (their description/registry is in skill_defs.odin),
+// plus the players' gun and the skill dice drops.
 //
 //  * Players start with NO skill. Skill dice drop from enemies (very rarely) and
 //    from "10th level" bosses (25%). Touching a die rolls a random skill, which
@@ -27,77 +28,6 @@ import rl "vendor:raylib"
 //  * All cooldowns are counted in the fixed 60 Hz ticks (update_ticks in game.odin).
 // =============================================================================
 
-// --- Skill metadata ---
-
-skill_name :: proc(kind: SkillKind) -> cstring {
-	switch kind {
-	case .Explosion:    return "EXPLOSION"
-	case .Rocket:       return "ROCKET BULLETS"
-	case .Invisibility: return "INVISIBILITY"
-	case .Surprise:     return "SURPRISE"
-	case .Repel:        return "REPEL"
-	case .Freeze:       return "FREEZE"
-	case .ComeBack:     return "COME BACK"
-	case .None:         return "NO SKILL"
-	}
-	return ""
-}
-
-skill_label :: proc(kind: SkillKind) -> cstring {
-	switch kind {
-	case .Explosion:    return "EXP"
-	case .Rocket:       return "RKT"
-	case .Invisibility: return "INV"
-	case .Surprise:     return "SUR"
-	case .Repel:        return "REP"
-	case .Freeze:       return "FRZ"
-	case .ComeBack:     return "CMB"
-	case .None:         return "-"
-	}
-	return "-"
-}
-
-skill_color :: proc(kind: SkillKind) -> rl.Color {
-	switch kind {
-	case .Explosion:    return rl.Color{255, 160, 50, 255}
-	case .Rocket:       return rl.Color{255, 85, 85, 255}
-	case .Invisibility: return rl.Color{120, 230, 255, 255}
-	case .Surprise:     return rl.Color{230, 110, 255, 255}
-	case .Repel:        return rl.Color{90, 255, 190, 255}
-	case .Freeze:       return rl.Color{110, 170, 255, 255}
-	case .ComeBack:     return rl.Color{255, 225, 90, 255}
-	case .None:         return rl.Color{150, 150, 160, 255}
-	}
-	return rl.WHITE
-}
-
-// Base cooldown (ticks) before the Cooldown enhancement is applied.
-skill_base_cooldown :: proc(kind: SkillKind) -> i32 {
-	switch kind {
-	case .Explosion:    return EXPLOSION_COOLDOWN_TICKS
-	case .Rocket:       return ROCKET_COOLDOWN_TICKS
-	case .Invisibility: return INVIS_COOLDOWN_TICKS
-	case .Surprise:     return SURPRISE_COOLDOWN_TICKS
-	case .Repel:        return REPEL_COOLDOWN_TICKS
-	case .Freeze:       return FREEZE_COOLDOWN_TICKS // the 3 s freeze comes on top (see skill_total_cooldown)
-	case .ComeBack:     return 0                     // no timer: once per level (Player.comeback_used)
-	case .None:         return 0
-	}
-	return 0
-}
-
-// Ticks between pressing the skill and having it ready again (what the HUD wheel counts down).
-// Freeze: the 30 s only start once the 3 s freeze is over.
-skill_total_cooldown :: proc(p: Player, kind: SkillKind) -> i32 {
-	if kind == .Freeze do return FREEZE_DURATION_TICKS + skill_cooldown(p, FREEZE_COOLDOWN_TICKS)
-	return skill_cooldown(p, skill_base_cooldown(kind))
-}
-
-// The Cooldown enhancement (-10% per copy) shortens every skill cooldown.
-skill_cooldown :: proc(p: Player, base: i32) -> i32 {
-	return max(1, i32(math.round(f32(base) * ability_cooldown_multiplier(p))))
-}
-
 player_invulnerable :: proc(p: Player) -> bool {
 	return p.invis_ticks > 0 || p.surprise_ticks > 0
 }
@@ -117,13 +47,12 @@ grant_skill :: proc(g: ^Game, p: ^Player, kind: SkillKind) {
 
 // Takes the next owned skill (in wheel order).
 cycle_skill :: proc(g: ^Game, p: ^Player) {
-	order := SKILLS
 	start := 0
-	for k, i in order {
-		if k == p.skill do start = i
+	for i in 0 ..< SKILL_COUNT {
+		if skill_at(i) == p.skill do start = i
 	}
-	for step in 1 ..= len(order) {
-		k := order[(start + step) % len(order)]
+	for step in 1 ..= SKILL_COUNT {
+		k := skill_at((start + step) % SKILL_COUNT)
 		if p.skills_owned[k] {
 			if k != p.skill {
 				p.skill = k
@@ -138,33 +67,30 @@ cycle_skill :: proc(g: ^Game, p: ^Player) {
 
 activate_skill :: proc(g: ^Game, p: ^Player, index: int) {
 	if p.skill == .None || p.skill_cd[p.skill] > 0 do return
+	use := skill_def(p.skill).use
+	if use != nil do use(g, p, i32(index)) // passive skills (Rocket) have no use proc
+}
+
+// Invisibility: invulnerable for a few seconds.
+use_invisibility :: proc(g: ^Game, p: ^Player, index: i32) {
 	c := player_center(p^)
-	switch p.skill {
-	case .Explosion:
-		use_explosion(g, p)
-	case .Invisibility:
-		p.invis_ticks = INVIS_DURATION_TICKS
-		p.skill_cd[.Invisibility] = skill_cooldown(p^, INVIS_COOLDOWN_TICKS)
-		spawn_ring(g, c, skill_color(.Invisibility), 30, 220, 0.4, 3)
-		spawn_burst(g, c, rl.WHITE, 16, 160, 2.5)
-	case .Surprise:
-		p.surprise_ticks = SURPRISE_DURATION_TICKS
-		p.skill_cd[.Surprise] = skill_cooldown(p^, SURPRISE_COOLDOWN_TICKS)
-		spawn_ring(g, c, skill_color(.Surprise), 36, 300, 0.4, 3.5)
-		add_shake(g, 3)
-	case .Repel:
-		use_repel(g, p, i32(index))
-	case .Freeze:
-		use_freeze(g, p)
-	case .ComeBack:
-		use_comeback(g, p, i32(index))
-	case .Rocket, .None:
-		// Rocket is passive: it changes what the gun fires.
-	}
+	p.invis_ticks = INVIS_DURATION_TICKS
+	p.skill_cd[.Invisibility] = skill_cooldown(p^, INVIS_COOLDOWN_TICKS)
+	spawn_ring(g, c, skill_color(.Invisibility), 30, 220, 0.4, 3)
+	spawn_burst(g, c, rl.WHITE, 16, 160, 2.5)
+}
+
+// Surprise: for a short window everything that touches the player is reflected.
+use_surprise :: proc(g: ^Game, p: ^Player, index: i32) {
+	c := player_center(p^)
+	p.surprise_ticks = SURPRISE_DURATION_TICKS
+	p.skill_cd[.Surprise] = skill_cooldown(p^, SURPRISE_COOLDOWN_TICKS)
+	spawn_ring(g, c, skill_color(.Surprise), 36, 300, 0.4, 3.5)
+	add_shake(g, 3)
 }
 
 // Explosion: kills regular enemies in range, damages bosses (the old repel blast).
-use_explosion :: proc(g: ^Game, p: ^Player) {
+use_explosion :: proc(g: ^Game, p: ^Player, index: i32) {
 	center := player_center(p^)
 	p.skill_cd[.Explosion] = skill_cooldown(p^, EXPLOSION_COOLDOWN_TICKS)
 	p.visual_timer = BLAST_VISUAL_TIME
@@ -179,7 +105,7 @@ use_explosion :: proc(g: ^Game, p: ^Player) {
 		dist := linalg.length(offset)
 		if dist - e.radius >= REPULSION_RADIUS do continue
 
-		if e.kind == .Boss {
+		if enemy_def(e.kind).is_boss {
 			e.hp -= 1
 			e.flash = 0.15
 			spawn_burst(g, e.pos, rl.WHITE, 14, 260, 3)
@@ -239,14 +165,14 @@ use_repel :: proc(g: ^Game, p: ^Player, index: i32) {
 
 	// Enemies (any kind, the boss included; armed sticky bombs are already counting down)
 	for &e in g.enemies {
-		if !e.active || (e.kind == .Sticky && e.stuck) do continue
+		if !e.active || enemy_inert(e) do continue
 		epos := closest_wrapped_pos(e, center)
 		off := epos - center
 		dist := linalg.length(off)
 		if dist - e.radius > radius do continue
 		dir := off / dist if dist > 0.001 else [2]f32{1, 0}
 		e.knock = dir * push
-		if e.kind == .Boss {
+		if enemy_def(e.kind).is_boss {
 			e.dash_t = 0
 			e.dash_windup = 0
 			e.charge = 0
@@ -272,7 +198,7 @@ use_repel :: proc(g: ^Game, p: ^Player, index: i32) {
 // weapons), enemy bullets, asteroids and the spawners. Player shots keep flying, so a frozen
 // enemy can still be shot. Frozen enemies are drawn through the ice shader (render.odin) and
 // cannot hurt anyone. The 30 s cooldown starts after the thaw, so the timer is 3 s + 30 s.
-use_freeze :: proc(g: ^Game, p: ^Player) {
+use_freeze :: proc(g: ^Game, p: ^Player, index: i32) {
 	c := player_center(p^)
 	col := skill_color(.Freeze)
 	g.freeze_ticks = FREEZE_DURATION_TICKS
@@ -369,12 +295,12 @@ comeback_effect :: proc(g: ^Game, from, to: [2]f32, col: rl.Color) {
 muzzle_local :: proc(p: Player, side: f32) -> [2]f32 {
 	switch p.ship {
 	case .Fighter:
-		// The two wing-root guns of the Dart (slim arrow hull).
-		return {p.size.x * 0.5 * 0.10, side * p.size.y * 0.5 * 0.37}
+		// The two shoulder guns of the Spear (the barbs' front corners).
+		return {p.size.x * 0.5 * 0.5, side * p.size.y * 0.5 * 0.55}
 	case .Interceptor:
-		// The boom-tip guns of the Bulwark.
+		// The two nose-edge guns of the Hauler.
 		u := max(p.size.x, p.size.y) * 0.5
-		return {u * 1.17, side * u * 0.78}
+		return {u * 0.95, side * u * 0.30}
 	}
 	return {}
 }
@@ -430,7 +356,7 @@ fire_gun :: proc(g: ^Game, p: ^Player, index: i32) {
 
 // Regular enemies die, bosses lose `amount` hp.
 damage_enemy :: proc(g: ^Game, e: ^Enemy, amount: i32, killer: ^Player, hit_pos: [2]f32) {
-	if e.kind == .Boss {
+	if enemy_def(e.kind).is_boss {
 		e.hp -= amount
 		e.flash = 0.12
 		spawn_burst(g, hit_pos, rl.WHITE, 6, 180, 2.5)
@@ -562,7 +488,7 @@ reflect_enemy :: proc(g: ^Game, e: ^Enemy, p: ^Player, index: i32, epos: [2]f32)
 	spawn_ring(g, pc, skill_color(.Surprise), 18, 240, 0.3, 3)
 	add_shake(g, 5)
 
-	if e.kind == .Boss {
+	if enemy_def(e.kind).is_boss {
 		e.hit_cd = BOSS_HIT_COOLDOWN
 		e.dash_t = 0
 		e.dash_windup = 0
@@ -612,7 +538,7 @@ handle_player_actions :: proc(g: ^Game) {
 		if rl.IsKeyPressed(p.cycle_key) do cycle_skill(g, &p)
 		if rl.IsKeyPressed(p.skill_key) do activate_skill(g, &p, i)
 		// Auto-aim toggle: only meaningful for a skill that aims (Rocket); ignored otherwise.
-		if p.skill == .Rocket && rl.IsKeyPressed(p.aim_key) {
+		if skill_def(p.skill).has_aim_toggle && rl.IsKeyPressed(p.aim_key) {
 			p.skill_aim = !p.skill_aim
 			spawn_ring(g, player_center(p), skill_color(.Rocket), 14, 150, 0.3, 2.5)
 		}
@@ -684,15 +610,14 @@ collect_skill_pickups :: proc(g: ^Game) {
 		}
 		if collector == nil do continue
 
-		order := SKILLS
-		grant_skill(g, collector, order[rand.int31_max(i32(len(order)))])
+		grant_skill(g, collector, skill_at(int(rand.int31_max(SKILL_COUNT))))
 		spawn_burst(g, pk.pos, rl.WHITE, 40, 240, 4)
 		pk.active = false
 	}
 }
 
 update_skill_pickups :: proc(g: ^Game, dt: f32) {
-	// Like enhancements, the timer pauses on the portal screen.
+	// Like statuses, the timer pauses on the portal screen.
 	for &pk in g.skill_pickups {
 		if !pk.active do continue
 		pk.spin += dt
@@ -725,8 +650,7 @@ draw_skill_pickups :: proc(g: ^Game) {
 		corners := [4][2]f32{{-h, -h}, {h, -h}, {h, h}, {-h, h}}
 		pts: [4][2]f32
 		for c, i in corners do pts[i] = pk.pos + rotate_vec(c, rot)
-		draw_quad_ccw(pts[0], pts[1], pts[2], pts[3], rl.Color{240, 240, 248, 255})
-		for i in 0 ..< 4 do rl.DrawLineEx(pts[i], pts[(i + 1) % 4], 2, col)
+		toon_quad(pts[0], pts[1], pts[2], pts[3], rl.Color{240, 240, 248, 255})
 
 		pips := DIE_PIPS
 		face := int(t * 9 + pk.spin * 3) % 6

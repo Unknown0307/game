@@ -5,7 +5,7 @@ import "core:math"
 import rl "vendor:raylib"
 
 // =============================================================================
-// enemy_art.odin - the look of every enemy. All shapes are built from triangles
+// enemy_art.odin - the look of every enemy, in the shared cartoon style (toon.odin). All shapes are built from triangles
 // in "local units" (+x = the way the ship faces) scaled by the enemy radius, so
 // hitboxes stay the circles gameplay already uses.
 //
@@ -66,20 +66,13 @@ draw_raider :: proc(e: Enemy, col: rl.Color, t, ph: f32) {
 	flick := 0.75 + 0.25 * math.sin(t * 34 + ph)
 	draw_exhaust(c, a, r, -0.5, 0, 0.28, 0.9 * flick, rl.Color{255, 110, 40, 255})
 
-	nose  := epoint(c, a, r, 1.4, 0)
-	lw    := epoint(c, a, r, -0.9, -1.05)
-	rw    := epoint(c, a, r, -0.9, 1.05)
-	notch := epoint(c, a, r, -0.5, 0)
-	draw_tri_ccw(nose, lw, notch, col)
-	draw_tri_ccw(nose, notch, rw, col)
-	draw_tri_ccw(epoint(c, a, r, 0.9, 0), epoint(c, a, r, -0.2, -0.42), epoint(c, a, r, -0.2, 0.42), shade(col, 0.5))
-
-	edge := rl.Fade(rl.WHITE, 0.35)
-	rl.DrawLineV(nose, lw, edge)
-	rl.DrawLineV(lw, notch, edge)
-	rl.DrawLineV(notch, rw, edge)
-	rl.DrawLineV(rw, nose, edge)
-	rl.DrawCircleV(epoint(c, a, r, 0.4, 0), r * 0.2, rl.Color{255, 235, 130, 255})
+	// A simple arrowhead: flat fill, darker lower half, a light glint, ink outline, one gem.
+	hull := [4][2]f32{epoint(c, a, r, 1.4, 0), epoint(c, a, r, -0.9, -1.05), epoint(c, a, r, -0.5, 0), epoint(c, a, r, -0.9, 1.05)}
+	draw_fan_ccw(c, hull[:], col)
+	draw_tri_ccw(hull[0], hull[3], hull[2], toon_dark(col))
+	draw_tri_ccw(epoint(c, a, r, 1.0, -0.05), epoint(c, a, r, -0.3, -0.55), epoint(c, a, r, -0.2, -0.05), toon_light(col))
+	toon_outline(hull[:])
+	toon_gem(epoint(c, a, r, 0.3, 0), r * 0.22, rl.Color{255, 235, 130, 255})
 }
 
 // --- Rocket / drone (Runner) ---
@@ -88,23 +81,18 @@ draw_rocket :: proc(e: Enemy, col: rl.Color, t, ph: f32) {
 	c, a, r := e.pos, e.angle, e.radius
 	draw_exhaust(c, a, r, -1.25, 0, 0.32, 1.3 + 0.5 * math.sin(t * 40 + ph), rl.Color{255, 150, 40, 255})
 
-	// Fins, body, nose cone.
+	// Two fins, a rounded body with a dark band, a pale nose cone and a porthole.
 	for side in ([2]f32{-1, 1}) {
-		draw_tri_ccw(epoint(c, a, r, -0.55, side * 0.34), epoint(c, a, r, -1.3, side * 1.05), epoint(c, a, r, -1.3, side * 0.34), shade(col, 0.7))
+		fin := [3][2]f32{epoint(c, a, r, -0.55, side * 0.34), epoint(c, a, r, -1.3, side * 1.05), epoint(c, a, r, -1.3, side * 0.34)}
+		draw_tri_ccw(fin[0], fin[1], fin[2], toon_dark(col))
+		toon_outline(fin[:])
 	}
-	b0 := epoint(c, a, r, 0.85, -0.38)
-	b1 := epoint(c, a, r, 0.85, 0.38)
-	b2 := epoint(c, a, r, -1.3, 0.38)
-	b3 := epoint(c, a, r, -1.3, -0.38)
-	draw_quad_ccw(b0, b1, b2, b3, col)
-	draw_quad_ccw(epoint(c, a, r, -0.2, -0.38), epoint(c, a, r, -0.2, 0.38), epoint(c, a, r, -0.6, 0.38), epoint(c, a, r, -0.6, -0.38), shade(col, 0.55))
-	nose := epoint(c, a, r, 1.8, 0)
-	draw_tri_ccw(nose, b0, b1, rl.Color{240, 240, 245, 255})
-
-	edge := rl.Fade(rl.WHITE, 0.35)
-	rl.DrawLineV(b0, b3, edge)
-	rl.DrawLineV(b1, b2, edge)
-	rl.DrawCircleV(epoint(c, a, r, 0.4, 0), r * 0.17, rl.Fade(rl.SKYBLUE, 0.95))
+	toon_quad(epoint(c, a, r, 0.85, -0.38), epoint(c, a, r, 0.85, 0.38), epoint(c, a, r, -1.3, 0.38), epoint(c, a, r, -1.3, -0.38), col)
+	toon_quad(epoint(c, a, r, -0.5, -0.38), epoint(c, a, r, -0.5, 0.38), epoint(c, a, r, -0.9, 0.38), epoint(c, a, r, -0.9, -0.38), toon_dark(col))
+	nose := [3][2]f32{epoint(c, a, r, 1.8, 0), epoint(c, a, r, 0.85, -0.38), epoint(c, a, r, 0.85, 0.38)}
+	draw_tri_ccw(nose[0], nose[1], nose[2], rl.Color{240, 240, 245, 255})
+	toon_outline(nose[:])
+	toon_gem(epoint(c, a, r, 0.3, 0), r * 0.2, rl.SKYBLUE)
 }
 
 // --- Cruiser (Big) ---
@@ -126,23 +114,21 @@ draw_cruiser :: proc(e: Enemy, col: rl.Color, t, ph: f32) {
 	inner: [9][2]f32
 	for p, i in local {
 		hull[i]  = epoint(c, a, r, p.x, p.y)
-		inner[i] = epoint(c, a, r, p.x * 0.62, p.y * 0.62)
+		inner[i] = epoint(c, a, r, p.x * 0.6, p.y * 0.6)
 	}
 	draw_fan_ccw(c, hull[:], col)
-	draw_fan_ccw(c, inner[:], shade(col, 0.55))
-	draw_poly_outline(hull[:], rl.Fade(rl.WHITE, 0.4))
-	rl.DrawLineV(epoint(c, a, r, 1.3, 0), epoint(c, a, r, -1.0, 0), rl.Fade(rl.WHITE, 0.2))
+	draw_fan_ccw(c, inner[:], toon_dark(col)) // flat darker deck
+	toon_outline(hull[:])
 
 	// Twin turrets and a lit bridge.
-	barrel := rl.Color{30, 30, 40, 255}
-	if e.laser do barrel = rl.Color{20, 50, 65, 255}
+	barrel := rl.Color{58, 62, 82, 255}
+	if e.laser do barrel = rl.Color{30, 90, 120, 255}
 	for side in ([2]f32{-1, 1}) {
 		base := epoint(c, a, r, 0.15, side * 0.55)
-		rl.DrawLineEx(base, epoint(c, a, r, 0.85, side * 0.55), max(2.0, r * 0.1), barrel)
-		rl.DrawCircleV(base, r * 0.19, rl.Color{30, 30, 40, 255})
-		rl.DrawCircleLines(i32(base.x), i32(base.y), r * 0.19, rl.Fade(rl.WHITE, 0.45))
+		toon_stroke(base, epoint(c, a, r, 0.85, side * 0.55), max(2.0, r * 0.1), barrel)
+		toon_disc(base, r * 0.19, barrel)
 	}
-	rl.DrawCircleV(epoint(c, a, r, -0.25, 0), r * 0.2, rl.Color{255, 200, 90, 255})
+	toon_gem(epoint(c, a, r, -0.25, 0), r * 0.2, rl.Color{255, 200, 90, 255})
 
 	if e.laser {
 		// Nose emitter that charges up between beams.
@@ -171,21 +157,21 @@ draw_mine :: proc(e: Enemy, col: rl.Color, t, ph: f32) {
 	spin := t * 1.4 * fast + ph
 	blink := 0.5 + 0.5 * math.sin(t * (7.0 * fast) + ph)
 
-	for i in 0 ..< 8 {
-		ang := spin + f32(i) * math.PI / 4
-		tip := c + [2]f32{math.cos(ang), math.sin(ang)} * r * 1.55
-		b1  := c + [2]f32{math.cos(ang - 0.24), math.sin(ang - 0.24)} * r * 0.9
-		b2  := c + [2]f32{math.cos(ang + 0.24), math.sin(ang + 0.24)} * r * 0.9
-		draw_tri_ccw(tip, b1, b2, shade(col, 0.7))
+	// Six stubby spikes, a round body and one blinking core.
+	for i in 0 ..< 6 {
+		ang := spin + f32(i) * math.PI / 3
+		spike := [3][2]f32{
+			c + [2]f32{math.cos(ang), math.sin(ang)} * r * 1.5,
+			c + [2]f32{math.cos(ang - 0.3), math.sin(ang - 0.3)} * r * 0.9,
+			c + [2]f32{math.cos(ang + 0.3), math.sin(ang + 0.3)} * r * 0.9,
+		}
+		draw_tri_ccw(spike[0], spike[1], spike[2], toon_dark(col))
+		toon_outline(spike[:])
 	}
-	rl.DrawCircleV(c, r * 0.95, shade(col, 0.35))
-	rl.DrawCircleLines(i32(c.x), i32(c.y), r * 0.95, rl.Fade(rl.WHITE, 0.5))
-	for i in 0 ..< 4 {
-		ang := -spin * 1.5 + f32(i) * math.PI / 2
-		rl.DrawCircleV(c + [2]f32{math.cos(ang), math.sin(ang)} * r * 0.65, r * 0.1, rl.Fade(rl.WHITE, 0.8))
-	}
+	toon_disc(c, r * 0.95, col)
 	rl.BeginBlendMode(.ADDITIVE)
-	rl.DrawCircleV(c, r * (0.38 + 0.14 * blink), rl.Fade(col, 0.95))
+	rl.DrawCircleV(c, r * (0.34 + 0.12 * blink), rl.Fade(rl.WHITE, 0.55))
+	rl.DrawCircleV(c, r * (0.5 + 0.12 * blink), rl.Fade(col, 0.55))
 	rl.EndBlendMode()
 }
 
@@ -205,7 +191,6 @@ whale_pt :: proc(c: [2]f32, a, k, sway, x, y: f32) -> [2]f32 {
 
 draw_whale :: proc(c: [2]f32, a, k: f32, body: rl.Color, t, ph: f32, boss: bool) {
 	belly := tint_up(body, 0.55)
-	back  := shade(body, 0.7)
 	sway  := 0.32 * math.sin(t * 3.2 + ph)
 
 	local := WHALE_HULL
@@ -213,34 +198,33 @@ draw_whale :: proc(c: [2]f32, a, k: f32, body: rl.Color, t, ph: f32, boss: bool)
 	for p, i in local do hull[i] = whale_pt(c, a, k, sway, p.x, p.y)
 	draw_fan_ccw(epoint(c, a, k, 0, 0), hull[:], body)
 
-	// Darker back, pale belly.
-	bo := [4][2]f32{{1.1, -0.42}, {0.45, -0.78}, {-0.3, -0.72}, {-0.85, -0.4}}
-	bi := [4][2]f32{{1.0, -0.2}, {0.4, -0.38}, {-0.3, -0.34}, {-0.85, -0.2}}
-	lo := [4][2]f32{{1.1, 0.42}, {0.45, 0.72}, {-0.3, 0.68}, {-0.85, 0.38}}
-	li := [4][2]f32{{1.0, 0.12}, {0.4, 0.22}, {-0.3, 0.18}, {-0.85, 0.12}}
+	// One pale belly patch (flat), a pectoral fin, an ink outline.
+	bo := [4][2]f32{{1.1, 0.42}, {0.45, 0.72}, {-0.3, 0.68}, {-0.85, 0.38}}
+	bi := [4][2]f32{{1.0, 0.12}, {0.4, 0.22}, {-0.3, 0.18}, {-0.85, 0.12}}
 	for i in 0 ..< 3 {
-		draw_quad_ccw(epoint(c, a, k, bo[i].x, bo[i].y), epoint(c, a, k, bo[i + 1].x, bo[i + 1].y), epoint(c, a, k, bi[i + 1].x, bi[i + 1].y), epoint(c, a, k, bi[i].x, bi[i].y), back)
-		draw_quad_ccw(epoint(c, a, k, lo[i].x, lo[i].y), epoint(c, a, k, lo[i + 1].x, lo[i + 1].y), epoint(c, a, k, li[i + 1].x, li[i + 1].y), epoint(c, a, k, li[i].x, li[i].y), belly)
+		draw_quad_ccw(epoint(c, a, k, bo[i].x, bo[i].y), epoint(c, a, k, bo[i + 1].x, bo[i + 1].y), epoint(c, a, k, bi[i + 1].x, bi[i + 1].y), epoint(c, a, k, bi[i].x, bi[i].y), belly)
 	}
-
-	// Pectoral fin, eye, mouth line.
 	flap := 0.12 * math.sin(t * 3.2 + ph + 1.2)
-	draw_tri_ccw(epoint(c, a, k, 0.3, 0.5), epoint(c, a, k, -0.35, 1.0 + flap), epoint(c, a, k, -0.45, 0.4), shade(body, 0.6))
-	draw_poly_outline(hull[:], rl.Fade(rl.WHITE, 0.3))
-	rl.DrawLineV(epoint(c, a, k, 1.3, 0.14), epoint(c, a, k, 0.7, 0.22), rl.Fade(rl.BLACK, 0.6))
-	eye := epoint(c, a, k, 0.85, -0.12)
-	rl.DrawCircleV(eye, k * 0.1, rl.WHITE)
-	rl.DrawCircleV(eye, k * 0.055, rl.Color{20, 10, 40, 255})
+	fin := [3][2]f32{epoint(c, a, k, 0.3, 0.5), epoint(c, a, k, -0.35, 1.0 + flap), epoint(c, a, k, -0.45, 0.4)}
+	draw_tri_ccw(fin[0], fin[1], fin[2], toon_dark(body))
+	toon_outline(fin[:])
+	toon_outline(hull[:])
+
+	// Big friendly cartoon eye and a short smile line.
+	rl.DrawLineEx(epoint(c, a, k, 1.28, 0.16), epoint(c, a, k, 0.75, 0.24), TOON_W, TOON_LINE)
+	eye := epoint(c, a, k, 0.85, -0.14)
+	toon_disc(eye, k * 0.15, rl.WHITE)
+	rl.DrawCircleV(eye + rotate_vec({k * 0.03, 0}, a), k * 0.065, TOON_LINE)
 
 	if boss {
-		// Bioluminescent runes along the back - the mothership glow.
+		// Bioluminescent spots along the back - the mothership glow.
 		rl.BeginBlendMode(.ADDITIVE)
 		for i in 0 ..< 5 {
 			x := 0.75 - f32(i) * 0.4
 			col := rl.Color{255, 90, 200, 255}
 			if i % 2 == 1 do col = rl.Color{90, 220, 255, 255}
 			pulse := 0.5 + 0.5 * math.sin(t * 4 + f32(i) * 1.3)
-			rl.DrawCircleV(whale_pt(c, a, k, sway, x, -0.52), k * (0.07 + 0.04 * pulse), rl.Fade(col, 0.55 + 0.4 * pulse))
+			rl.DrawCircleV(whale_pt(c, a, k, sway, x, -0.5), k * (0.07 + 0.04 * pulse), rl.Fade(col, 0.55 + 0.4 * pulse))
 		}
 		rl.EndBlendMode()
 	}
@@ -274,20 +258,19 @@ draw_mothership :: proc(e: Enemy, k: f32, body: rl.Color, t, ph: f32) {
 	deck:  [12][2]f32
 	for p, i in local {
 		hull[i] = epoint(c, a, k, p.x, p.y)
-		deck[i] = epoint(c, a, k, p.x * 0.7, p.y * 0.7)
+		deck[i] = epoint(c, a, k, p.x * 0.68, p.y * 0.68)
 	}
 	draw_fan_ccw(c, hull[:], body)
-	draw_fan_ccw(c, deck[:], shade(body, 0.5))
-	draw_poly_outline(hull[:], rl.Fade(rl.WHITE, 0.4))
-	draw_poly_outline(deck[:], rl.Fade(rl.WHITE, 0.15))
+	draw_fan_ccw(c, deck[:], toon_dark(body)) // flat darker deck
+	toon_outline(hull[:])
 
 	// Twin gun pods on the front shoulders; the one that just fired flashes.
+	pod := rl.Color{58, 62, 82, 255}
 	for side in ([2]f32{-1, 1}) {
 		base := epoint(c, a, k, 0.8, side * 0.6)
 		tip  := epoint(c, a, k, 1.2, side * 0.6)
-		rl.DrawLineEx(base, tip, max(2.0, k * 0.12), rl.Color{25, 25, 40, 255})
-		rl.DrawCircleV(base, k * 0.15, rl.Color{25, 25, 40, 255})
-		rl.DrawCircleLines(i32(base.x), i32(base.y), k * 0.15, rl.Fade(rl.WHITE, 0.45))
+		toon_stroke(base, tip, max(2.0, k * 0.12), pod)
+		toon_disc(base, k * 0.15, pod)
 	}
 	if e.gun_ticks >= MOTHERSHIP_BULLET_COOLDOWN_TICKS - 3 {
 		last: f32 = -1 if e.gun_flip else 1
@@ -296,19 +279,15 @@ draw_mothership :: proc(e: Enemy, k: f32, body: rl.Color, t, ph: f32) {
 		rl.EndBlendMode()
 	}
 
-	// Dome with a glint, and a ring of chasing lights around the rim.
-	dome := epoint(c, a, k, -0.1, 0)
-	rl.DrawCircleV(dome, k * 0.42, rl.Color{12, 14, 34, 255})
-	rl.DrawCircleV(dome, k * 0.32, rl.Fade(a2, 0.55))
-	rl.DrawCircleLines(i32(dome.x), i32(dome.y), k * 0.42, rl.Fade(rl.WHITE, 0.5))
-	rl.DrawCircleV(epoint(c, a, k, -0.02, -0.12), k * 0.08, rl.Fade(rl.WHITE, 0.9))
+	// One big dome gem, and six soft rim lights.
+	toon_gem(epoint(c, a, k, -0.1, 0), k * 0.4, a2)
 
 	rl.BeginBlendMode(.ADDITIVE)
-	for i in 0 ..< 10 {
-		ang := f32(i) * (2.0 * math.PI / 10.0)
-		pulse := 0.5 + 0.5 * math.sin(t * 6 - f32(i) * 0.9)
-		lp := epoint(c, a, k, math.cos(ang) * 1.12, math.sin(ang) * 0.8)
-		rl.DrawCircleV(lp, k * (0.05 + 0.03 * pulse), rl.Fade(a1 if i % 2 == 0 else a2, 0.45 + 0.5 * pulse))
+	for i in 0 ..< 6 {
+		ang := f32(i) * (2.0 * math.PI / 6.0) + 0.5
+		pulse := 0.5 + 0.5 * math.sin(t * 6 - f32(i) * 1.2)
+		lp := epoint(c, a, k, math.cos(ang) * 1.1, math.sin(ang) * 0.8)
+		rl.DrawCircleV(lp, k * (0.06 + 0.03 * pulse), rl.Fade(a1 if i % 2 == 0 else a2, 0.5 + 0.45 * pulse))
 	}
 
 	// Front emitter: charges while the raygun aims, blazes while it fires.
@@ -326,20 +305,19 @@ draw_drone :: proc(e: Enemy, col: rl.Color, t, ph: f32) {
 	flick := 0.75 + 0.25 * math.sin(t * 36 + ph)
 	draw_exhaust(c, a, r, -1.0, 0, 0.3, 1.1 * flick, rl.Color{140, 200, 255, 255})
 
-	// A little flying saucer: side fins, disc, glowing core.
+	// A little flying saucer: two fins, a rounded disc, one gem.
 	for side in ([2]f32{-1, 1}) {
-		draw_tri_ccw(epoint(c, a, r, 0.1, side * 0.8), epoint(c, a, r, -0.9, side * 1.5), epoint(c, a, r, -0.9, side * 0.6), shade(col, 0.6))
+		fin := [3][2]f32{epoint(c, a, r, 0.1, side * 0.8), epoint(c, a, r, -0.9, side * 1.5), epoint(c, a, r, -0.9, side * 0.6)}
+		draw_tri_ccw(fin[0], fin[1], fin[2], toon_dark(col))
+		toon_outline(fin[:])
 	}
 	disc := [8][2]f32{{1.35, 0}, {0.95, -0.72}, {0, -1.0}, {-0.95, -0.72}, {-1.2, 0}, {-0.95, 0.72}, {0, 1.0}, {0.95, 0.72}}
 	pts: [8][2]f32
 	for p, i in disc do pts[i] = epoint(c, a, r, p.x, p.y)
 	draw_fan_ccw(c, pts[:], col)
-	draw_poly_outline(pts[:], rl.Fade(rl.WHITE, 0.4))
-	rl.DrawCircleV(epoint(c, a, r, 0.1, 0), r * 0.38, rl.Color{12, 14, 34, 255})
+	toon_outline(pts[:])
 	blink := 0.5 + 0.5 * math.sin(t * 9 + ph)
-	rl.BeginBlendMode(.ADDITIVE)
-	rl.DrawCircleV(epoint(c, a, r, 0.1, 0), r * (0.2 + 0.1 * blink), rl.Fade(rl.WHITE, 0.9))
-	rl.EndBlendMode()
+	toon_gem(epoint(c, a, r, 0.1, 0), r * (0.34 + 0.06 * blink), rl.Color{190, 240, 255, 255})
 }
 
 // --- Dispatcher ---
@@ -354,13 +332,12 @@ draw_asteroid :: proc(e: Enemy, col: rl.Color, ph: f32) {
 		k := 0.78 + 0.22 * math.sin(f32(i) * 2.3 + ph * 3.1) + 0.08 * math.sin(f32(i) * 5.1 + ph)
 		pts[i] = e.pos + [2]f32{math.cos(a), math.sin(a)} * e.radius * k
 	}
-	draw_fan_ccw(e.pos, pts[:], shade(col, 0.75))
-	// lit side + craters
-	lit := e.pos + rotate_vec({-0.2, -0.25}, e.angle) * e.radius
-	rl.DrawCircleV(lit, e.radius * 0.45, shade(col, 0.95))
+	draw_fan_ccw(e.pos, pts[:], shade(col, 0.8))
+	// Flat lit patch and two round craters, then the ink outline.
+	rl.DrawCircleV(e.pos + rotate_vec({-0.22, -0.25}, e.angle) * e.radius, e.radius * 0.38, toon_light(shade(col, 0.8)))
 	rl.DrawCircleV(e.pos + rotate_vec({0.35, 0.2}, e.angle) * e.radius, e.radius * 0.2, shade(col, 0.5))
-	rl.DrawCircleV(e.pos + rotate_vec({-0.4, 0.4}, e.angle) * e.radius, e.radius * 0.14, shade(col, 0.55))
-	draw_poly_outline(pts[:], rl.Fade(rl.WHITE, 0.3))
+	rl.DrawCircleV(e.pos + rotate_vec({-0.4, 0.4}, e.angle) * e.radius, e.radius * 0.14, shade(col, 0.5))
+	toon_outline(pts[:])
 }
 
 // Frozen enemies (Freeze skill) are drawn through the ice shader. Text must NOT be drawn inside it.
@@ -370,6 +347,106 @@ begin_ice :: proc(g: ^Game, on: bool) {
 
 end_ice :: proc(on: bool) {
 	if on do rl.EndShaderMode()
+}
+
+// --- Per-type draw hooks (referenced from enemy_def in enemy_defs.odin) ---
+// Each one draws its enemy through the ice shader while frozen (text must NOT be drawn inside it).
+
+draw_normal :: proc(g: ^Game, e: Enemy, col: rl.Color, t, ph: f32, frozen: bool) {
+	begin_ice(g, frozen)
+	draw_raider(e, col, t, ph)
+	end_ice(frozen)
+}
+
+draw_runner_enemy :: proc(g: ^Game, e: Enemy, col: rl.Color, t, ph: f32, frozen: bool) {
+	begin_ice(g, frozen)
+	draw_rocket(e, col, t, ph)
+	end_ice(frozen)
+}
+
+draw_big :: proc(g: ^Game, e: Enemy, col: rl.Color, t, ph: f32, frozen: bool) {
+	begin_ice(g, frozen)
+	draw_cruiser(e, col, t, ph)
+	end_ice(frozen)
+}
+
+draw_asteroid_enemy :: proc(g: ^Game, e: Enemy, col: rl.Color, t, ph: f32, frozen: bool) {
+	begin_ice(g, frozen)
+	draw_asteroid(e, col, ph)
+	end_ice(frozen)
+}
+
+draw_sticky :: proc(g: ^Game, e: Enemy, col: rl.Color, t, ph: f32, frozen: bool) {
+	begin_ice(g, frozen)
+	draw_mine(e, col, t, ph)
+	end_ice(frozen)
+	ex, ey := i32(e.pos.x), i32(e.pos.y)
+	if e.stuck {
+		blink := 0.55 + 0.45 * math.sin(f32(e.stick_ticks) * 5.0)
+		rl.DrawCircleLines(ex, ey, STICKY_EXPLOSION_RADIUS, rl.Fade(rl.Color{255, 90, 210, 255}, 0.35 + 0.25 * blink))
+		rl.DrawText(fmt.ctprintf("%d", e.stick_ticks), ex - 4, ey - 6, 12, rl.WHITE)
+	} else {
+		rl.DrawCircleLines(ex, ey, e.radius * 1.9, rl.Fade(rl.Color{255, 210, 100, 255}, 0.55))
+	}
+}
+
+draw_minion :: proc(g: ^Game, e: Enemy, col: rl.Color, t, ph: f32, frozen: bool) {
+	begin_ice(g, frozen)
+	if e.skin == .Mothership {
+		draw_drone(e, col, t, ph)
+	} else {
+		draw_whale(e.pos, e.angle, e.radius * 0.95, col, t, ph, false)
+	}
+	end_ice(frozen)
+}
+
+draw_boss :: proc(g: ^Game, e: Enemy, col: rl.Color, t, ph: f32, frozen: bool) {
+	// Draw every screen-wrapped copy that is visible, so the whale slides
+	// seamlessly out of one edge and into the opposite one.
+	margin := e.radius * 1.9
+	for ox in ([3]f32{0, SCREEN_W, -SCREEN_W}) {
+		for oy in ([3]f32{0, SCREEN_H, -SCREEN_H}) {
+			ge := e
+			ge.pos = e.pos + [2]f32{ox, oy}
+			if ge.pos.x < -margin || ge.pos.x > SCREEN_W + margin do continue
+			if ge.pos.y < -margin || ge.pos.y > SCREEN_H + margin do continue
+			body := col
+			if e.enraged && e.flash <= 0 do body = rl.Color{210, 50, 70, 255}
+			begin_ice(g, frozen)
+			if e.skin == .Mothership {
+				draw_mothership(ge, e.radius * 0.9, body, t, ph)
+			} else {
+				draw_whale(ge.pos, ge.angle, e.radius * 0.85, body, t, ph, true)
+			}
+			end_ice(frozen)
+			draw_boss_extras(g, ge)
+		}
+	}
+}
+
+// --- Per-type glow hooks (additive blend is already on) ---
+
+glow_big :: proc(g: ^Game, e: Enemy, t: f32) {
+	gcol := rl.RED
+	if e.laser do gcol = LASER_COLOR
+	draw_glow(e.pos, e.radius * 1.6, gcol, 0.2)
+}
+
+glow_sticky :: proc(g: ^Game, e: Enemy, t: f32) {
+	scale: f32 = 1.3
+	if e.stuck do scale = 1.8
+	draw_glow(e.pos, e.radius * scale, rl.Color{255, 80, 210, 255}, 0.28)
+}
+
+glow_minion :: proc(g: ^Game, e: Enemy, t: f32) {
+	draw_glow(e.pos, e.radius * 1.8, rl.Color{200, 120, 255, 255}, 0.18)
+}
+
+glow_boss :: proc(g: ^Game, e: Enemy, t: f32) {
+	pulse := 0.5 + 0.5 * math.sin(t * (14 if e.enraged else 8))
+	gcol := rl.Color{255, 60, 200, 255}
+	if e.enraged do gcol = rl.Color{255, 50, 40, 255}
+	draw_glow(e.pos, e.radius * (2.4 if e.enraged else 2.0) + pulse * 10, gcol, 0.55 if e.enraged else 0.45)
 }
 
 draw_enemies :: proc(g: ^Game) {
@@ -385,65 +462,7 @@ draw_enemies :: proc(g: ^Game) {
 		col := e.color
 		if e.flash > 0 do col = rl.WHITE
 
-		switch e.kind {
-		case .Normal:
-			begin_ice(g, frozen)
-			draw_raider(e, col, t, ph)
-			end_ice(frozen)
-		case .Asteroid:
-			begin_ice(g, frozen)
-			draw_asteroid(e, col, ph)
-			end_ice(frozen)
-		case .Runner:
-			begin_ice(g, frozen)
-			draw_rocket(e, col, t, ph)
-			end_ice(frozen)
-		case .Big:
-			begin_ice(g, frozen)
-			draw_cruiser(e, col, t, ph)
-			end_ice(frozen)
-		case .Sticky:
-			begin_ice(g, frozen)
-			draw_mine(e, col, t, ph)
-			end_ice(frozen)
-			ex, ey := i32(e.pos.x), i32(e.pos.y)
-			if e.stuck {
-				blink := 0.55 + 0.45 * math.sin(f32(e.stick_ticks) * 5.0)
-				rl.DrawCircleLines(ex, ey, STICKY_EXPLOSION_RADIUS, rl.Fade(rl.Color{255, 90, 210, 255}, 0.35 + 0.25 * blink))
-				rl.DrawText(fmt.ctprintf("%d", e.stick_ticks), ex - 4, ey - 6, 12, rl.WHITE)
-			} else {
-				rl.DrawCircleLines(ex, ey, e.radius * 1.9, rl.Fade(rl.Color{255, 210, 100, 255}, 0.55))
-			}
-		case .Minion:
-			begin_ice(g, frozen)
-			if e.skin == .Mothership {
-				draw_drone(e, col, t, ph)
-			} else {
-				draw_whale(e.pos, e.angle, e.radius * 0.95, col, t, ph, false)
-			}
-			end_ice(frozen)
-		case .Boss:
-			// Draw every screen-wrapped copy that is visible, so the whale slides
-			// seamlessly out of one edge and into the opposite one.
-			margin := e.radius * 1.9
-			for ox in ([3]f32{0, SCREEN_W, -SCREEN_W}) {
-				for oy in ([3]f32{0, SCREEN_H, -SCREEN_H}) {
-					ge := e
-					ge.pos = e.pos + [2]f32{ox, oy}
-					if ge.pos.x < -margin || ge.pos.x > SCREEN_W + margin do continue
-					if ge.pos.y < -margin || ge.pos.y > SCREEN_H + margin do continue
-					body := col
-					if e.enraged && e.flash <= 0 do body = rl.Color{210, 50, 70, 255}
-					begin_ice(g, frozen)
-					if e.skin == .Mothership {
-						draw_mothership(ge, e.radius * 0.9, body, t, ph)
-					} else {
-						draw_whale(ge.pos, ge.angle, e.radius * 0.85, body, t, ph, true)
-					}
-					end_ice(frozen)
-					draw_boss_extras(g, ge)
-				}
-			}
-		}
+		draw := enemy_def(e.kind).draw
+		if draw != nil do draw(g, e, col, t, ph, frozen)
 	}
 }
