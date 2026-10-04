@@ -16,6 +16,7 @@ import rl "vendor:raylib"
 //   enemy_art.odin   how every enemy looks (ships, rockets, space whales)
 //   ship_art.odin    how the two player ships look (P1 dart, P2 twin-boom gunship)
 //   gunfire.odin     enemy bullets, lasers, mothership raygun, all bullet flight
+//   minions.odin     the Minion enhancement: an allied laser drone that follows its summoner
 //   boss.odin        boss spawning (whale or mothership), repel + summon behaviour
 //   pickups.odin     coins, allies, enhancement drops
 //   fx.odin          particles, floating text, shake

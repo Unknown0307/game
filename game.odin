@@ -46,12 +46,15 @@ reset_level_world :: proc(g: ^Game) {
 	for &b in g.bullets     do b.active = false
 	for &k in g.enh_pickups do k.active = false
 	for &k in g.skill_pickups do k.active = false
+	g.freeze_ticks = 0
+	g.rewind = {} // Come Back only remembers the current level
 	clear_fx(g)
 }
 
 // Full restart (also used for the very first run).
 reset_run :: proc(g: ^Game) {
 	for i in 0 ..< PLAYER_COUNT do g.players[i] = make_player(i)
+	g.minions = {}
 	reset_level_world(g)
 	reset_level_timers(g)
 	set_level(g, 1)
@@ -72,7 +75,9 @@ advance_level :: proc(g: ^Game) {
 		if p.dead do revive_player(&p)
 		p.pos   = p.start_pos
 		p.knock = {}
+		p.comeback_used = false // Come Back is available again in every level
 	}
+	revive_minions(g) // fallen minions resurrect, everybody gathers at the start positions
 
 	reset_level_world(g)
 	reset_level_timers(g)
@@ -85,7 +90,11 @@ begin_playing :: proc(g: ^Game) {
 	g.countdown = 0
 	g.phase     = .Playing
 	reset_level_timers(g)
-	if g.params.is_boss_level do spawn_boss(g)
+	if g.params.is_boss_level {
+		spawn_boss(g)
+		// Level 5 has a small chance of a second boss.
+		if g.level == DOUBLE_BOSS_LEVEL && rand.float32() < DOUBLE_BOSS_CHANCE do spawn_boss(g)
+	}
 	if g.level == SKILL_GIFT_LEVEL do gift_skill_dice(g)
 }
 
@@ -101,6 +110,7 @@ begin_level_complete :: proc(g: ^Game) {
 	g.phase       = .LevelComplete
 	g.portal_open = 0
 	g.boss_warn   = 0
+	g.freeze_ticks = 0
 	// The arena is now safe. Enhancement pickups are kept so they can still be
 	// collected before entering the portal.
 	for &e in g.enemies do e.active = false
@@ -286,10 +296,12 @@ update_spit :: proc(g: ^Game, dt: f32) {
 }
 
 update_spawners :: proc(g: ^Game, dt: f32) {
+	frozen := g.freeze_ticks > 0 // the Freeze skill also stops the enemy spawners
+
 	// Regular enemies. Subtracting the interval (instead of resetting to 0)
 	// keeps the spawn rate exact even when a frame runs long.
-	g.spawn_timer += dt
-	for g.spawn_timer >= g.params.spawn_interval {
+	if !frozen do g.spawn_timer += dt
+	for !frozen && g.spawn_timer >= g.params.spawn_interval {
 		g.spawn_timer -= g.params.spawn_interval
 		spawn_enemy_at_edge(g, pick_enemy_kind(g.params))
 	}
@@ -306,8 +318,8 @@ update_spawners :: proc(g: ^Game, dt: f32) {
 	rate: f32 = ASTEROID_RATE_IDLE
 	belt_pos, belt_r, has_belt := active_belt(g)
 	if has_belt do rate = ASTEROID_RATE_BELT
-	g.asteroid_timer += dt
-	for g.asteroid_timer >= 1.0 / rate {
+	if !frozen do g.asteroid_timer += dt
+	for !frozen && g.asteroid_timer >= 1.0 / rate {
 		g.asteroid_timer -= 1.0 / rate
 		if has_belt {
 			spawn_asteroid_from_belt(g, belt_pos, belt_r)
@@ -332,9 +344,16 @@ update_ticks :: proc(g: ^Game, dt: f32) {
 			tick_shields(&p)
 			tick_player_skills(&p)
 		}
-		tick_reflected_enemies(g)
-		update_sticky_ticks(g)
-		update_enemy_guns(g)
+		if g.freeze_ticks > 0 {
+			// Frozen: enemy fuses, reflections and weapons all wait.
+			g.freeze_ticks -= 1
+		} else {
+			tick_reflected_enemies(g)
+			update_sticky_ticks(g)
+			update_enemy_guns(g)
+		}
+		tick_player_minions(g)
+		record_rewind(g) // Come Back remembers the last 5 s
 	}
 }
 
@@ -343,6 +362,7 @@ resolve_collisions :: proc(g: ^Game) {
 		enemy_hits_player(g, &p, i32(i))
 	}
 	enemies_hit_allies(g)
+	enemies_hit_minions(g)
 	for &p in g.players {
 		collect_coins(g, &p)
 		heal_from_allies(g, &p)
@@ -407,6 +427,7 @@ game_update :: proc(g: ^Game, dt: f32) {
 	case .GameOver:      update_game_over(g)
 	}
 	if g.spit_t > 0 do update_spit(g, dt)
+	update_player_minions(g, dt)
 
 	// Pickups/FX keep animating during countdown and level transitions.
 	update_pickups(g, dt)

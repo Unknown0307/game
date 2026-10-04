@@ -58,10 +58,10 @@ PLAYER2_TRAIL_LENGTH       :: 14
 // Every timer is in 60 Hz ticks. Seconds are converted with TICK_RATE.
 EXPLOSION_COOLDOWN_TICKS :: i32(2 * TICK_RATE)   // 2 s  = 120 ticks (the old blast cooldown)
 ROCKET_COOLDOWN_TICKS    :: 40                   // time between rockets
-ROCKET_SPEED             :: 430.0
+ROCKET_SPEED             :: 500.0
 ROCKET_RANGE             :: MAP_DIAGONAL         // rockets also cross the whole map (never less than a normal shot)
-ROCKET_BLAST_RADIUS      :: 38.0                 // small explosion
-ROCKET_BOSS_DAMAGE       :: 2
+ROCKET_BLAST_RADIUS      :: 40.0                 // small explosion
+ROCKET_BOSS_DAMAGE       :: 4
 INVIS_DURATION_TICKS     :: i32(5 * TICK_RATE)   // 5 s  = 300 ticks of invulnerability
 INVIS_COOLDOWN_TICKS     :: i32(10 * TICK_RATE)  // 10 s = 600 ticks (counted from activation)
 SURPRISE_DURATION_TICKS  :: 40                   // reflect window
@@ -81,6 +81,18 @@ SKILL_PICKUP_LIFETIME      :: 20.0
 SKILL_PICKUP_RADIUS        :: 14.0
 MAX_SKILL_PICKUPS          :: 4
 SKILL_GIFT_LEVEL           :: 4     // on this level every player is given one skill die at the start
+SKILL_BOSS_GUARANTEED_LEVEL  :: 5   // the boss of this level ALWAYS drops a skill die...
+SKILL_BOSS_GUARANTEED_CHANCE :: 1.0 // ...(100%; with two bosses each of them drops one)
+
+// --- Freeze skill: everything except the players stops for 3 s ---
+FREEZE_DURATION_TICKS :: i32(3 * TICK_RATE)   // 3 s  = 180 ticks frozen
+FREEZE_COOLDOWN_TICKS :: i32(30 * TICK_RATE)  // 30 s = 1800 ticks, counted AFTER the freeze has ended
+FREEZE_VISUAL_TIME    :: 0.6                  // seconds of the expanding frost wave
+FREEZE_FADE_TICKS     :: 36                   // the ice melts away over the last 0.6 s
+
+// --- Come Back skill: jump back to where you were 5 s ago (once per level) ---
+REWIND_TICKS          :: 300                  // 5 s at 60 Hz of recorded history per player
+COMEBACK_VISUAL_TIME  :: 0.5
 
 // --- Mothership boss skin (the alternative to the space whale) ---
 MOTHERSHIP_CHANCE                :: 0.5
@@ -178,6 +190,9 @@ BOSS_SUMMON_COOLDOWN_BASE :: 3.0
 BOSS_SUMMON_COOLDOWN_STEP :: 0.05
 BOSS_SUMMON_COOLDOWN_MIN  :: 1.2
 BOSS_SUMMON_MINIONS       :: 3 // baby whales per summon (+2 while enraged)
+BOSS_NO_MINION_LEVEL      :: 5 // the boss of this level never summons minions
+DOUBLE_BOSS_LEVEL         :: 5    // this level may spawn two bosses...
+DOUBLE_BOSS_CHANCE        :: 0.10 // ...with this probability
 
 // --- Big enemy weapons (tick based, 60 ticks = 1 second) ---
 BIG_SHOOT_COOLDOWN_TICKS :: 20    // one bullet every 20 ticks (alternating turrets)
@@ -205,6 +220,19 @@ ENHANCEMENT_DROP_CHANCE       :: 0.0067 // any killed enemy
 BOSS_DOUBLE_ENHANCEMENT_CHANCE :: 0.10  // a boss always drops one; 10% for a second
 ENH_PICKUP_LIFETIME           :: 20.0
 ENH_PICKUP_RADIUS             :: 13.0
+MAX_HEALTH_BONUS_PER_COPY     :: 0.10 // "Max health" enhancement: +10% of the base max health per copy
+
+// --- "Minion" enhancement: an allied laser drone that follows its summoner ---
+MAX_PLAYER_MINIONS        :: PLAYER_COUNT * MAX_ENHANCEMENTS // one per Minion enhancement copy
+MINION_RADIUS             :: 14.0
+MINION_HEALTH_SHARE       :: 0.5    // minion max health = this share of the summoner's max health
+MINION_FOLLOW_DIST        :: 58.0   // orbit distance around the summoner
+MINION_MAX_SPEED          :: 420.0
+MINION_LEASH              :: 320.0  // farther than this from the summoner (screen wrap...) = teleport next to it
+MINION_TURN_RATE          :: 8.0    // rad/s, same as the laser cruisers
+MINION_AIM_TOLERANCE      :: 0.25   // radians: must face the target to fire
+MINION_LASER_COOLDOWN_TICKS :: 75   // a bit slower than the cruiser's 60
+MINION_LASER_DAMAGE       :: 1
 
 // --- Pickups ---
 COIN_RADIUS      :: 9.0

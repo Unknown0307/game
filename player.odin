@@ -62,6 +62,9 @@ revive_player :: proc(p: ^Player) {
 	p.surprise_ticks = 0
 	p.visual_timer = 0
 	p.repel_visual = 0
+	p.freeze_visual = 0
+	p.rewind_visual = 0
+	p.comeback_used = false
 	p.hurt_flash = 0
 	p.angle = 0
 	p.target_angle = 0
@@ -78,9 +81,15 @@ player_rect :: proc(p: Player) -> rl.Rectangle {
 	return rl.Rectangle{p.pos.x, p.pos.y, p.size.x, p.size.y}
 }
 
+// Total health: MAX_HEALTH plus 10% of it per "Max health" enhancement.
+player_max_health :: proc(p: Player) -> i32 {
+	bonus := MAX_HEALTH_BONUS_PER_COPY * f32(count_enhancement(p, .MaxHealth))
+	return i32(math.round(f32(MAX_HEALTH) * (1.0 + bonus)))
+}
+
 // Share of tags a player has left before dying (1.0 = full, 0.0 = dead)
 health_fraction :: proc(p: Player) -> f32 {
-	return max(0, 1 - f32(p.health_points) / f32(MAX_HEALTH))
+	return max(0, 1 - f32(p.health_points) / f32(player_max_health(p)))
 }
 
 total_score :: proc(g: ^Game) -> i32 {
@@ -103,6 +112,8 @@ enhancement_name :: proc(kind: EnhancementKind) -> cstring {
 	case .Extension: return "EXTENSION +5%"
 	case .Cooldown:  return "COOLDOWN -10%"
 	case .Damage:    return "DAMAGE TAKEN -10%"
+	case .MaxHealth: return "MAX HEALTH +10%"
+	case .Minion:    return "MINION"
 	case .None:      return ""
 	}
 	return ""
@@ -113,6 +124,8 @@ enhancement_label :: proc(kind: EnhancementKind) -> cstring {
 	case .Extension: return "EXT"
 	case .Cooldown:  return "CD"
 	case .Damage:    return "DMG"
+	case .MaxHealth: return "HP+"
+	case .Minion:    return "MIN"
 	case .None:      return "?"
 	}
 	return "?"
@@ -123,16 +136,16 @@ enhancement_color :: proc(kind: EnhancementKind) -> rl.Color {
 	case .Extension: return rl.SKYBLUE
 	case .Cooldown:  return rl.GOLD
 	case .Damage:    return rl.VIOLET
+	case .MaxHealth: return rl.Color{255, 100, 120, 255}
+	case .Minion:    return rl.Color{110, 255, 170, 255}
 	case .None:      return rl.Color{190, 210, 255, 255}
 	}
 	return rl.WHITE
 }
 
 random_enhancement_kind :: proc() -> EnhancementKind {
-	r := rand.float32()
-	if r >= 0.66 do return .Damage
-	if r >= 0.33 do return .Cooldown
-	return .Extension
+	all := [5]EnhancementKind{.Extension, .Cooldown, .Damage, .MaxHealth, .Minion}
+	return all[rand.int31_max(i32(len(all)))]
 }
 
 count_enhancement :: proc(p: Player, kind: EnhancementKind) -> i32 {
@@ -164,6 +177,10 @@ apply_enhancement :: proc(p: ^Player, kind: EnhancementKind) -> bool {
 		for k in SkillKind do p.skill_cd[k] = i32(f32(p.skill_cd[k]) * 0.90)
 	case .Damage:
 		// Computed dynamically from the stack count in hurt_player.
+	case .MaxHealth:
+		// Computed dynamically (player_max_health): the extra 10% is simply more room before dying.
+	case .Minion:
+		// The drone itself is created by collect_enhancements (it needs the Game).
 	case .None:
 	}
 	return true
@@ -249,8 +266,8 @@ hurt_player :: proc(g: ^Game, p: ^Player, amount: i32) {
 	spawn_burst(g, center, rl.RED, int(8 + effective * 2), 170, 3)
 	add_shake(g, min(3 + f32(effective), 12))
 
-	if p.health_points >= MAX_HEALTH {
-		p.health_points = MAX_HEALTH
+	if p.health_points >= player_max_health(p^) {
+		p.health_points = player_max_health(p^)
 		p.dead = true
 		p.shield_ticks = {}
 		p.invis_ticks = 0
@@ -266,6 +283,8 @@ hurt_player :: proc(g: ^Game, p: ^Player, amount: i32) {
 update_player_timers :: proc(p: ^Player, dt: f32) {
 	if p.visual_timer > 0 do p.visual_timer = max(0, p.visual_timer - dt)
 	if p.repel_visual > 0 do p.repel_visual = max(0, p.repel_visual - dt)
+	if p.freeze_visual > 0 do p.freeze_visual = max(0, p.freeze_visual - dt)
+	if p.rewind_visual > 0 do p.rewind_visual = max(0, p.rewind_visual - dt)
 	for i in 0 ..< 2 {
 		if p.muzzle_flash[i] > 0 do p.muzzle_flash[i] = max(0, p.muzzle_flash[i] - dt)
 	}

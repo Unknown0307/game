@@ -45,6 +45,146 @@ void main() {
 }
 `
 
+// Freeze skill: everything that is frozen is drawn through this. The original colours are
+// pushed toward an icy palette, with a frosty crystal pattern, twinkling glints and a cold
+// shimmer band. `amount` (0..1) fades the ice out when the freeze is about to end.
+FREEZE_FS: cstring : `#version 330
+in vec4 fragColor;
+uniform float time;
+uniform float amount;
+out vec4 finalColor;
+
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x),
+               mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+
+void main() {
+    vec3 base = fragColor.rgb;
+    float lum = dot(base, vec3(0.299, 0.587, 0.114));
+
+    // Icy palette keyed on the original brightness: dark parts deep blue, bright parts frosty white.
+    vec3 ice = mix(vec3(0.30, 0.55, 0.95), vec3(0.88, 0.97, 1.0), clamp(lum * 1.3, 0.0, 1.0));
+    vec3 col = mix(base, ice, 0.85 * amount);
+
+    // Frost crystals (screen-space noise) and a faint white rime.
+    vec2 p = gl_FragCoord.xy * 0.22;
+    float n = 0.65 * noise(p) + 0.35 * noise(p * 2.7 + 11.0);
+    float frost = smoothstep(0.55, 0.85, n);
+    col += vec3(0.50, 0.78, 1.0) * frost * 0.30 * amount;
+    col = mix(col, vec3(1.0), frost * 0.20 * amount);
+
+    // Twinkling glints.
+    vec2 cell = floor(gl_FragCoord.xy * 0.35);
+    float h = hash(cell);
+    float tw = pow(max(0.0, sin(time * 5.0 + h * 6.2831)), 12.0);
+    col += vec3(1.0) * step(0.93, h) * tw * 0.9 * amount;
+
+    // Slow cold shimmer sweeping across.
+    float band = 0.5 + 0.5 * sin(gl_FragCoord.x * 0.12 + gl_FragCoord.y * 0.09 - time * 2.0);
+    col += vec3(0.08, 0.18, 0.34) * band * 0.30 * amount;
+
+    finalColor = vec4(col, fragColor.a);
+}
+`
+
+// Player 1's hull: an iridescent energy-plasma skin. The pattern lives in SHIP-LOCAL space
+// (x = forward) so it flows from the nose to the tail and turns with the ship.
+DART_FS: cstring : `#version 330
+in vec4 fragColor;
+uniform float time;
+uniform vec3  tint;
+uniform vec2  center;   // ship centre in framebuffer pixels (origin bottom-left)
+uniform float angle;    // ship heading (radians, y-down world)
+uniform float thrust;   // 0..1
+out vec4 finalColor;
+
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x),
+               mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+vec3 pal(float t) { return 0.5 + 0.5 * cos(6.28318 * (t + vec3(0.00, 0.33, 0.67))); }
+
+void main() {
+    vec2 v = gl_FragCoord.xy - center;
+    vec2 w = vec2(v.x, -v.y);                       // back to the y-down world frame
+    float ca = cos(angle);
+    float sa = sin(angle);
+    vec2 l = vec2(w.x * ca + w.y * sa, -w.x * sa + w.y * ca);
+
+    // The hurt flash paints the hull pure white: keep it white.
+    float flash = step(0.97, min(min(fragColor.r, fragColor.g), fragColor.b));
+
+    // Plasma flowing from the nose to the tail; faster under thrust.
+    float flow = time * (3.0 + 4.0 * thrust);
+    float n1 = noise(l * 0.22 + vec2(flow * 0.35, 0.0));
+    float n2 = noise(l * 0.55 - vec2(flow * 0.80, time * 0.5));
+    float plasma = 0.6 * n1 + 0.4 * n2;
+
+    // Iridescent sheen, kept in the icy-blue family.
+    vec3 irid = pal(l.x * 0.035 + plasma * 0.55 - time * 0.25);
+    irid = mix(irid, vec3(0.55, 0.85, 1.0), 0.45);
+
+    // Energy veins streaming tail-ward.
+    float vein = pow(0.5 + 0.5 * sin(l.x * 0.6 - flow * 1.4 + n2 * 5.0), 10.0)
+               * smoothstep(0.35, 0.9, noise(vec2(l.y * 0.45, 3.0)));
+
+    float nose  = smoothstep(-12.0, 22.0, l.x);
+    float pulse = 0.5 + 0.5 * sin(time * 7.0);
+    float sparkle = step(0.965, hash(floor(l * 1.4) + floor(time * 14.0)));
+
+    vec3 base = mix(fragColor.rgb, tint, 0.35);
+    vec3 col = mix(base, irid, 0.55);
+    col *= 0.75 + 0.55 * plasma;
+    col += vec3(0.35, 0.70, 1.0) * vein * (0.6 + 0.8 * thrust);
+    col += vec3(0.50, 0.80, 1.0) * nose * (0.18 + 0.12 * pulse);
+    col += vec3(1.0) * sparkle * 0.7;
+    col = mix(col, vec3(1.0), flash);
+    finalColor = vec4(col, fragColor.a);
+}
+`
+
+// Player 1's energy aura: a pulsing halo with two rings of rotating arcs. Drawn additively on a
+// quad around the ship (premultiplication is not needed: rgb is added, weighted by alpha).
+AURA_FS: cstring : `#version 330
+in vec4 fragColor;
+uniform float time;
+uniform vec2  center;   // framebuffer pixels (origin bottom-left)
+uniform float radius;   // nominal ring radius in pixels
+uniform float thrust;
+uniform vec3  tint;
+out vec4 finalColor;
+
+void main() {
+    vec2 v = gl_FragCoord.xy - center;
+    float d = length(v) / radius;
+    float ang = atan(v.y, v.x);
+
+    float r1 = (d - 1.0) / 0.10;
+    float r2 = (d - 1.30) / 0.07;
+    float r3 = d * 1.25;
+    float ring  = exp(-r1 * r1);
+    float arcs  = pow(0.5 + 0.5 * sin(ang * 3.0 + time * 2.5 + sin(time * 1.3) * 2.0), 3.0);
+    float arcs2 = pow(0.5 + 0.5 * sin(ang * 5.0 - time * 3.7), 6.0);
+    float outerArc = exp(-r2 * r2) * arcs2;
+    float bloom = exp(-r3 * r3) * (0.20 + 0.15 * thrust);
+
+    float a = ring * (0.20 + 0.60 * arcs) + outerArc * 0.85 + bloom;
+    a = clamp(a * (0.75 + 0.25 * sin(time * 6.0)) * (0.85 + 0.35 * thrust), 0.0, 1.0);
+
+    vec3 col = mix(tint, vec3(0.75, 0.97, 1.0), clamp(arcs2 + 0.25 * outerArc, 0.0, 1.0));
+    finalColor = vec4(col, a);
+}
+`
+
 // Deep-space backdrop: a very dark, slowly drifting nebula tinted by the level palette.
 NEBULA_FS: cstring : `#version 330
 out vec4 finalColor;
@@ -219,11 +359,38 @@ ShipShader :: struct {
 	tint_loc: i32,
 }
 
+FreezeShader :: struct {
+	shader:     rl.Shader,
+	time_loc:   i32,
+	amount_loc: i32,
+}
+
+DartShader :: struct {
+	shader:     rl.Shader,
+	time_loc:   i32,
+	tint_loc:   i32,
+	center_loc: i32,
+	angle_loc:  i32,
+	thrust_loc: i32,
+}
+
+AuraShader :: struct {
+	shader:     rl.Shader,
+	time_loc:   i32,
+	center_loc: i32,
+	radius_loc: i32,
+	thrust_loc: i32,
+	tint_loc:   i32,
+}
+
 Shaders :: struct {
 	blast: BlastShader,
 	ship:  ShipShader,
 	nebula: NebulaShader,
 	hole:   HoleShader,
+	freeze: FreezeShader,
+	dart:   DartShader,
+	aura:   AuraShader,
 }
 
 load_shaders :: proc() -> Shaders {
@@ -231,7 +398,31 @@ load_shaders :: proc() -> Shaders {
 	ss := rl.LoadShaderFromMemory(nil, SHIP_FS)
 	ns := rl.LoadShaderFromMemory(nil, NEBULA_FS)
 	hs := rl.LoadShaderFromMemory(nil, HOLE_FS)
+	fs := rl.LoadShaderFromMemory(nil, FREEZE_FS)
+	ds := rl.LoadShaderFromMemory(nil, DART_FS)
+	au := rl.LoadShaderFromMemory(nil, AURA_FS)
 	return Shaders{
+		freeze = FreezeShader{
+			shader     = fs,
+			time_loc   = rl.GetShaderLocation(fs, "time"),
+			amount_loc = rl.GetShaderLocation(fs, "amount"),
+		},
+		dart = DartShader{
+			shader     = ds,
+			time_loc   = rl.GetShaderLocation(ds, "time"),
+			tint_loc   = rl.GetShaderLocation(ds, "tint"),
+			center_loc = rl.GetShaderLocation(ds, "center"),
+			angle_loc  = rl.GetShaderLocation(ds, "angle"),
+			thrust_loc = rl.GetShaderLocation(ds, "thrust"),
+		},
+		aura = AuraShader{
+			shader     = au,
+			time_loc   = rl.GetShaderLocation(au, "time"),
+			center_loc = rl.GetShaderLocation(au, "center"),
+			radius_loc = rl.GetShaderLocation(au, "radius"),
+			thrust_loc = rl.GetShaderLocation(au, "thrust"),
+			tint_loc   = rl.GetShaderLocation(au, "tint"),
+		},
 		blast = BlastShader{
 			shader     = bs,
 			center_loc = rl.GetShaderLocation(bs, "center"),
@@ -271,6 +462,46 @@ unload_shaders :: proc(s: Shaders) {
 	rl.UnloadShader(s.ship.shader)
 	rl.UnloadShader(s.nebula.shader)
 	rl.UnloadShader(s.hole.shader)
+	rl.UnloadShader(s.freeze.shader)
+	rl.UnloadShader(s.dart.shader)
+	rl.UnloadShader(s.aura.shader)
+}
+
+// Sets the ice shader's uniforms (call once, then BeginShaderMode(freeze.shader) around the draws).
+set_freeze_shader :: proc(s: FreezeShader, t, amount: f32) {
+	tt, am := t, amount
+	rl.SetShaderValue(s.shader, s.time_loc, &tt, .FLOAT)
+	rl.SetShaderValue(s.shader, s.amount_loc, &am, .FLOAT)
+}
+
+// Player 1's hull shader. `center` is in canvas pixels (inside the shaken camera) and `shake_off` is
+// that camera offset, like draw_hole_shader.
+set_dart_shader :: proc(s: DartShader, center, shake_off: [2]f32, angle, thrust, t: f32, tint: [3]f32) {
+	c := [2]f32{center.x + shake_off.x, f32(SCREEN_H) - (center.y + shake_off.y)}
+	tt, an, th, tn := t, angle, thrust, tint
+	rl.SetShaderValue(s.shader, s.time_loc, &tt, .FLOAT)
+	rl.SetShaderValue(s.shader, s.tint_loc, &tn, .VEC3)
+	rl.SetShaderValue(s.shader, s.center_loc, &c, .VEC2)
+	rl.SetShaderValue(s.shader, s.angle_loc, &an, .FLOAT)
+	rl.SetShaderValue(s.shader, s.thrust_loc, &th, .FLOAT)
+}
+
+// Player 1's aura: a quad around the ship drawn additively through AURA_FS.
+draw_ship_aura :: proc(a: AuraShader, center, shake_off: [2]f32, radius, t, thrust: f32, tint: [3]f32) {
+	c := [2]f32{center.x + shake_off.x, f32(SCREEN_H) - (center.y + shake_off.y)}
+	r, tt, th, tn := radius, t, thrust, tint
+	rl.SetShaderValue(a.shader, a.center_loc, &c, .VEC2)
+	rl.SetShaderValue(a.shader, a.radius_loc, &r, .FLOAT)
+	rl.SetShaderValue(a.shader, a.time_loc, &tt, .FLOAT)
+	rl.SetShaderValue(a.shader, a.thrust_loc, &th, .FLOAT)
+	rl.SetShaderValue(a.shader, a.tint_loc, &tn, .VEC3)
+
+	extent := i32(radius * 1.8)
+	rl.BeginBlendMode(.ADDITIVE)
+	rl.BeginShaderMode(a.shader)
+	rl.DrawRectangle(i32(center.x) - extent, i32(center.y) - extent, extent * 2, extent * 2, rl.WHITE)
+	rl.EndShaderMode()
+	rl.EndBlendMode()
 }
 
 // progress: 0 at the moment of the blast, 1 when it has finished.

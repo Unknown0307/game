@@ -29,6 +29,7 @@ shade :: proc(c: rl.Color, k: f32) -> rl.Color {
 
 draw_glows :: proc(g: ^Game) {
 	t := g.time
+	frozen := g.freeze_ticks > 0
 	rl.BeginBlendMode(.ADDITIVE)
 
 	for c in g.coins {
@@ -43,6 +44,11 @@ draw_glows :: proc(g: ^Game) {
 	}
 	for e in g.enemies {
 		if !e.active do continue
+		if frozen {
+			// Frozen things glow a steady icy blue instead of their own colour.
+			draw_glow(e.pos, e.radius * (2.0 if e.kind == .Boss else 1.7), rl.Color{140, 200, 255, 255}, 0.30)
+			continue
+		}
 		switch e.kind {
 		case .Boss:
 			pulse := 0.5 + 0.5 * math.sin(t * (14 if e.enraged else 8))
@@ -247,8 +253,12 @@ draw_entities :: proc(g: ^Game) {
 	draw_allies(g)
 	draw_enhancement_pickups(g)
 	draw_enemies(g)
-	draw_lasers(g)
-	draw_rayguns(g)
+	if g.freeze_ticks <= 0 { // frozen weapons are switched off
+		draw_lasers(g)
+		draw_rayguns(g)
+	}
+	draw_player_minions(g)
+	draw_minion_lasers(g)
 	draw_skill_pickups(g)
 	draw_bullets(g)
 	for p in g.players do draw_player(g, p)
@@ -321,6 +331,16 @@ draw_shockwaves :: proc(g: ^Game, shake_off: [2]f32) {
 		rc := color_vec(skill_color(.Repel))
 		draw_blast(g.shaders.blast, player_center(p) + shake_off, progress, repel_radius(p), rc)
 	}
+	for p in g.players {
+		if p.freeze_visual <= 0 do continue
+		progress := (FREEZE_VISUAL_TIME - p.freeze_visual) / FREEZE_VISUAL_TIME
+		draw_blast(g.shaders.blast, player_center(p) + shake_off, progress, 650, color_vec(skill_color(.Freeze)))
+	}
+	for p in g.players {
+		if p.rewind_visual <= 0 do continue
+		progress := (COMEBACK_VISUAL_TIME - p.rewind_visual) / COMEBACK_VISUAL_TIME
+		draw_blast(g.shaders.blast, player_center(p) + shake_off, progress, 150, color_vec(skill_color(.ComeBack)))
+	}
 	for e in g.enemies {
 		if !e.active || e.kind != .Boss || e.repel_visual <= 0 do continue
 		progress := (BOSS_REPEL_VISUAL_TIME - e.repel_visual) / BOSS_REPEL_VISUAL_TIME
@@ -334,6 +354,7 @@ render_world :: proc(g: ^Game) {
 	draw_space_background(g, hs)
 
 	shake_off := [2]f32{rand_signed(), rand_signed()} * g.fx.shake * shake_scale(g.settings)
+	g.shake_off = shake_off // the ship shaders work in framebuffer pixels and need it
 	camera := rl.Camera2D{offset = shake_off, zoom = 1.0}
 	rl.BeginMode2D(camera)
 	draw_black_hole(g, hs, shake_off)

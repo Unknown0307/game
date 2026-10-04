@@ -165,19 +165,22 @@ collect_enhancements :: proc(g: ^Game) {
 		if !pk.active do continue
 
 		collector: ^Player = nil
+		collector_index: i32 = 0
 		best: f32 = math.F32_MAX
-		for &p in g.players {
+		for &p, pi in g.players {
 			if p.dead || p.enhancement_count >= MAX_ENHANCEMENTS do continue
 			if !rl.CheckCollisionCircleRec(pk.pos, ENH_PICKUP_RADIUS, player_rect(p)) do continue
 			d := linalg.length(player_center(p) - pk.pos)
 			if d < best {
 				best = d
 				collector = &p
+				collector_index = i32(pi)
 			}
 		}
 		if collector == nil do continue
 
 		if apply_enhancement(collector, pk.kind) {
+			if pk.kind == .Minion do spawn_player_minion(g, collector_index)
 			spawn_burst(g, pk.pos, rl.WHITE, 45, 250, 4)
 			add_float(g, player_center(collector^), collector.enhancement_count, .Enhancement)
 			pk.active = false

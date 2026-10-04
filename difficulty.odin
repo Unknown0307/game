@@ -27,6 +27,7 @@ level_params :: proc(level: i32) -> LevelParams {
 	tier := max(level / BOSS_LEVEL_INTERVAL, 1)
 	p.boss_hp = BOSS_HP_BASE + (tier - 1) * BOSS_HP_PER_TIER
 	p.boss_summon_cd = max(BOSS_SUMMON_COOLDOWN_BASE - BOSS_SUMMON_COOLDOWN_STEP * t, BOSS_SUMMON_COOLDOWN_MIN)
+	p.boss_summons   = level != BOSS_NO_MINION_LEVEL // level 5: the boss fights alone
 	return p
 }
 

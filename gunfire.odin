@@ -105,6 +105,17 @@ beam_hit :: proc(g: ^Game, origin, dir: [2]f32, length, half_w: f32, damage: i32
 			}
 		}
 	}
+	for &m in g.minions {
+		if !m.exists || !m.alive do continue
+		for i in 0 ..= n {
+			pt := origin + dir * (length * f32(i) / f32(n))
+			if rl.CheckCollisionCircles(pt, half_w, m.pos, MINION_RADIUS) {
+				hurt_minion(g, &m, damage)
+				spawn_burst(g, pt, color, 6, 140, 2.5)
+				break
+			}
+		}
+	}
 }
 
 laser_hit :: proc(g: ^Game, e: Enemy) {
@@ -224,6 +235,7 @@ update_bullets :: proc(g: ^Game, dt: f32) {
 			update_player_shot(g, &b, dt)
 			continue
 		}
+		if g.freeze_ticks > 0 do continue // frozen enemy bullets hang in the air
 
 		b.pos += b.vel * dt
 		b.life -= dt
@@ -265,35 +277,59 @@ update_bullets :: proc(g: ^Game, dt: f32) {
 				break
 			}
 		}
+		if !b.active do continue
+
+		// The players' minions can be shot too (reflected bullets only hurt the other player).
+		if b.reflected do continue
+		for &m in g.minions {
+			if !m.exists || !m.alive do continue
+			if rl.CheckCollisionCircles(b.pos, BULLET_RADIUS, m.pos, MINION_RADIUS) {
+				hurt_minion(g, &m, BULLET_DAMAGE)
+				spawn_burst(g, b.pos, BULLET_COLOR, 6, 140, 2.5)
+				b.active = false
+				break
+			}
+		}
 	}
+}
+
+draw_bullet :: proc(g: ^Game, b: Bullet) {
+	d := linalg.normalize0(b.vel)
+
+	if b.from_player && b.rocket {
+		col := skill_color(.Rocket)
+		flick := 0.7 + 0.3 * math.sin(g.time * 60 + b.pos.x)
+		rl.DrawLineEx(b.pos, b.pos - d * 22 * flick, 5, rl.Fade(rl.Color{255, 190, 80, 255}, 0.5))
+		draw_glow(b.pos, 16, col, 0.7)
+		rl.DrawLineEx(b.pos - d * 6, b.pos + d * 6, 4, rl.Fade(rl.WHITE, 0.95))
+		return
+	}
+
+	col := BULLET_COLOR
+	if b.from_player || b.reflected do col = g.players[b.owner].color
+	if b.from_player {
+		rl.DrawLineEx(b.pos, b.pos - d * 16, 3, rl.Fade(col, 0.5))
+		draw_glow(b.pos, 10, col, 0.7)
+		rl.DrawCircleV(b.pos, PLAYER_BULLET_RADIUS * 0.8, rl.Fade(rl.WHITE, 0.95))
+		return
+	}
+	rl.DrawLineEx(b.pos, b.pos - d * 14, 3, rl.Fade(col, 0.45))
+	draw_glow(b.pos, 12, col, 0.6)
+	rl.DrawCircleV(b.pos, BULLET_RADIUS * 0.8, rl.Fade(rl.WHITE, 0.95))
 }
 
 draw_bullets :: proc(g: ^Game) {
 	rl.BeginBlendMode(.ADDITIVE)
 	for b in g.bullets {
 		if !b.active do continue
-		d := linalg.normalize0(b.vel)
-
-		if b.from_player && b.rocket {
-			col := skill_color(.Rocket)
-			flick := 0.7 + 0.3 * math.sin(g.time * 60 + b.pos.x)
-			rl.DrawLineEx(b.pos, b.pos - d * 22 * flick, 5, rl.Fade(rl.Color{255, 190, 80, 255}, 0.5))
-			draw_glow(b.pos, 16, col, 0.7)
-			rl.DrawLineEx(b.pos - d * 6, b.pos + d * 6, 4, rl.Fade(rl.WHITE, 0.95))
-			continue
+		// Enemy bullets hang frozen in the air (drawn through the ice shader); player shots keep flying.
+		frozen := g.freeze_ticks > 0 && !b.from_player
+		if frozen {
+			set_freeze_shader(g.shaders.freeze, g.time, freeze_amount(g))
+			rl.BeginShaderMode(g.shaders.freeze.shader)
 		}
-
-		col := BULLET_COLOR
-		if b.from_player || b.reflected do col = g.players[b.owner].color
-		if b.from_player {
-			rl.DrawLineEx(b.pos, b.pos - d * 16, 3, rl.Fade(col, 0.5))
-			draw_glow(b.pos, 10, col, 0.7)
-			rl.DrawCircleV(b.pos, PLAYER_BULLET_RADIUS * 0.8, rl.Fade(rl.WHITE, 0.95))
-			continue
-		}
-		rl.DrawLineEx(b.pos, b.pos - d * 14, 3, rl.Fade(col, 0.45))
-		draw_glow(b.pos, 12, col, 0.6)
-		rl.DrawCircleV(b.pos, BULLET_RADIUS * 0.8, rl.Fade(rl.WHITE, 0.95))
+		draw_bullet(g, b)
+		if frozen do rl.EndShaderMode()
 	}
 	rl.EndBlendMode()
 }

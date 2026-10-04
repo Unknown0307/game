@@ -161,6 +161,13 @@ nearest_target :: proc(g: ^Game, from: [2]f32, wrap := false) -> (target: [2]f32
 			dist, target, found = d, a.pos, true
 		}
 	}
+	for m in g.minions { // the players' minions are targets too
+		if !m.exists || !m.alive do continue
+		d := linalg.length(wrap_delta(from, m.pos) if wrap else m.pos - from)
+		if d < dist {
+			dist, target, found = d, m.pos, true
+		}
+	}
 	return
 }
 
@@ -300,8 +307,16 @@ emit_enemy_trail :: proc(g: ^Game, e: Enemy) {
 update_enemies :: proc(g: ^Game, dt: f32) {
 	for &e in g.enemies {
 		if !e.active do continue
-		if e.hit_cd > 0 do e.hit_cd -= dt
 		if e.flash > 0  do e.flash -= dt
+
+		// Frozen (Freeze skill): no steering, knock-back, weapons or culling - just a few ice sparkles.
+		if g.freeze_ticks > 0 {
+			if rand.float32() < 0.012 {
+				spawn_particle(g, e.pos + rand_vec2() * e.radius * 0.8, {0, -14}, rl.Color{170, 220, 255, 255}, 0.5, 2.5)
+			}
+			continue
+		}
+		if e.hit_cd > 0 do e.hit_cd -= dt
 
 		if e.kind == .Sticky && e.stuck {
 			e.pos = e.stick_pos
@@ -386,6 +401,12 @@ explode_sticky_enemy :: proc(g: ^Game, e: ^Enemy) {
 			hurt_player(g, &p, e.damage)
 		}
 	}
+	for &m in g.minions {
+		if !m.exists || !m.alive do continue
+		if rl.CheckCollisionCircles(center, STICKY_EXPLOSION_RADIUS, m.pos, MINION_RADIUS) {
+			hurt_minion(g, &m, e.damage)
+		}
+	}
 	spawn_burst(g, center, rl.Color{255, 70, 220, 255}, 42, 250, 4)
 	spawn_burst(g, center, rl.Color{255, 220, 120, 255}, 18, 180, 3)
 	add_shake(g, 8)
@@ -402,6 +423,7 @@ update_sticky_ticks :: proc(g: ^Game) {
 
 enemy_hits_player :: proc(g: ^Game, p: ^Player, index: i32) {
 	if p.dead || p.invis_ticks > 0 do return // invisible: everything passes through
+	if g.freeze_ticks > 0 do return           // frozen enemies are harmless
 	rect := player_rect(p^)
 
 	for &e in g.enemies {
@@ -456,6 +478,7 @@ enemy_hits_player :: proc(g: ^Game, p: ^Player, index: i32) {
 
 // Enemies target allies too: contact damages the ally (a boss kills it outright).
 enemies_hit_allies :: proc(g: ^Game) {
+	if g.freeze_ticks > 0 do return
 	for &e in g.enemies {
 		if !e.active do continue
 		for &a in g.allies {

@@ -16,6 +16,8 @@ EnhancementKind :: enum {
 	Extension, // player body size +5%
 	Cooldown,  // ability cooldown -10% per copy
 	Damage,    // incoming damage -10% per copy
+	MaxHealth, // total max health +10% per copy
+	Minion,    // spawns an allied laser drone with half of your max health
 }
 
 // Skills are separate from enhancements: found as dice, kept in a wheel.
@@ -26,9 +28,11 @@ SkillKind :: enum {
 	Invisibility, // invulnerable for 5 s
 	Surprise,     // 40 ticks: everything that touches you is reflected, you take no damage
 	Repel,        // 3 s cooldown: shoves every projectile, enemy and the other player 6 ship sizes away
+	Freeze,       // everything except the players freezes for 3 s; 30 s cooldown after the thaw
+	ComeBack,     // teleports you (and your minions) back to where you were 5 s ago, health included; once per level
 }
 
-SKILLS :: [5]SkillKind{.Explosion, .Repel, .Rocket, .Invisibility, .Surprise}
+SKILLS :: [7]SkillKind{.Explosion, .Repel, .Rocket, .Invisibility, .Surprise, .Freeze, .ComeBack}
 
 // What the boss looks like (the whale is the original; the mothership shoots).
 BossSkin :: enum {
@@ -131,6 +135,9 @@ Player :: struct {
 	muzzle_flash:  [2]f32,             // seconds left of the flash on each wing gun
 	visual_timer:  f32,
 	repel_visual:  f32, // seconds left of the Repel shockwave
+	freeze_visual: f32, // seconds left of the Freeze frost wave
+	rewind_visual: f32, // seconds left of the Come Back flash
+	comeback_used: bool, // Come Back may only be used once per level
 	hurt_flash:    f32,
 	angle:         f32,
 	target_angle:  f32,
@@ -235,6 +242,43 @@ SkillPickup :: struct {
 	active: bool,
 }
 
+// The Minion enhancement: an allied drone that looks like a laser cruiser and fights for its summoner.
+PlayerMinion :: struct {
+	exists:      bool,   // slot in use (one minion per Minion enhancement copy)
+	alive:       bool,   // false = dead; it resurrects at the start of the next level
+	owner:       i32,    // player index
+	slot:        i32,    // which of the owner's minions this is (0..MAX_ENHANCEMENTS-1)
+	pos:         [2]f32,
+	angle:       f32,
+	taken:       i32,    // damage taken (same scheme as Player.health_points)
+	max_hp:      i32,    // half of the owner's max health (follows the owner's Max health enhancements)
+	flash:       f32,
+	hit_cd:      f32,    // boss contact cooldown
+	gun_ticks:   i32,    // ticks until the next beam
+	laser_ticks: i32,    // > 0 while the beam is on
+	shrink:      f32,    // mirrors the owner while the portal swallows / spits out the ships
+}
+
+// What Come Back remembers every tick (5 s of it per player).
+RewindMinion :: struct {
+	valid: bool,   // this minion existed at that moment
+	alive: bool,
+	pos:   [2]f32,
+	taken: i32,
+}
+
+RewindSnap :: struct {
+	pos:           [2]f32,
+	health_points: i32,
+	minions:       [MAX_ENHANCEMENTS]RewindMinion,
+}
+
+RewindBuffer :: struct {
+	snaps: [REWIND_TICKS]RewindSnap,
+	head:  int, // next index to write
+	count: int, // valid entries (<= REWIND_TICKS)
+}
+
 Coin :: struct {
 	pos:    [2]f32,
 	life:   f32,
@@ -281,6 +325,7 @@ LevelParams :: struct {
 	boss_hp:        i32,
 	boss_has_ability: bool,
 	boss_summon_cd: f32,
+	boss_summons:   bool, // false: this level's boss never summons minions
 }
 
 // --- Space backdrop ---
@@ -334,6 +379,12 @@ Game :: struct {
 	fx:          Fx,
 	shaders:     Shaders,
 	backdrop:    Backdrop,
+	minions:     [MAX_PLAYER_MINIONS]PlayerMinion,
+	rewind:      [PLAYER_COUNT]RewindBuffer,
+
+	freeze_ticks: i32, // > 0: every enemy / enemy bullet / spawner is frozen (the Freeze skill)
+	freeze_time:  f32, // g.time at the moment of freezing: frozen things stop animating
+	shake_off:    [2]f32, // this frame's camera shake offset (shaders that work in framebuffer pixels need it)
 
 	phase:        GamePhase,
 	level:        i32,

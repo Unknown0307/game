@@ -363,8 +363,22 @@ draw_asteroid :: proc(e: Enemy, col: rl.Color, ph: f32) {
 	draw_poly_outline(pts[:], rl.Fade(rl.WHITE, 0.3))
 }
 
+// Frozen enemies (Freeze skill) are drawn through the ice shader. Text must NOT be drawn inside it.
+begin_ice :: proc(g: ^Game, on: bool) {
+	if on do rl.BeginShaderMode(g.shaders.freeze.shader)
+}
+
+end_ice :: proc(on: bool) {
+	if on do rl.EndShaderMode()
+}
+
 draw_enemies :: proc(g: ^Game) {
+	frozen := g.freeze_ticks > 0
 	t := g.time
+	if frozen {
+		t = g.freeze_time // frozen things stop animating (tails, flames, spinning mines)
+		set_freeze_shader(g.shaders.freeze, g.time, freeze_amount(g))
+	}
 	for e, idx in g.enemies {
 		if !e.active do continue
 		ph := f32(idx) * 1.7
@@ -372,12 +386,26 @@ draw_enemies :: proc(g: ^Game) {
 		if e.flash > 0 do col = rl.WHITE
 
 		switch e.kind {
-		case .Normal: draw_raider(e, col, t, ph)
-		case .Asteroid: draw_asteroid(e, col, ph)
-		case .Runner: draw_rocket(e, col, t, ph)
-		case .Big:    draw_cruiser(e, col, t, ph)
+		case .Normal:
+			begin_ice(g, frozen)
+			draw_raider(e, col, t, ph)
+			end_ice(frozen)
+		case .Asteroid:
+			begin_ice(g, frozen)
+			draw_asteroid(e, col, ph)
+			end_ice(frozen)
+		case .Runner:
+			begin_ice(g, frozen)
+			draw_rocket(e, col, t, ph)
+			end_ice(frozen)
+		case .Big:
+			begin_ice(g, frozen)
+			draw_cruiser(e, col, t, ph)
+			end_ice(frozen)
 		case .Sticky:
+			begin_ice(g, frozen)
 			draw_mine(e, col, t, ph)
+			end_ice(frozen)
 			ex, ey := i32(e.pos.x), i32(e.pos.y)
 			if e.stuck {
 				blink := 0.55 + 0.45 * math.sin(f32(e.stick_ticks) * 5.0)
@@ -387,11 +415,13 @@ draw_enemies :: proc(g: ^Game) {
 				rl.DrawCircleLines(ex, ey, e.radius * 1.9, rl.Fade(rl.Color{255, 210, 100, 255}, 0.55))
 			}
 		case .Minion:
+			begin_ice(g, frozen)
 			if e.skin == .Mothership {
 				draw_drone(e, col, t, ph)
 			} else {
 				draw_whale(e.pos, e.angle, e.radius * 0.95, col, t, ph, false)
 			}
+			end_ice(frozen)
 		case .Boss:
 			// Draw every screen-wrapped copy that is visible, so the whale slides
 			// seamlessly out of one edge and into the opposite one.
@@ -404,11 +434,13 @@ draw_enemies :: proc(g: ^Game) {
 					if ge.pos.y < -margin || ge.pos.y > SCREEN_H + margin do continue
 					body := col
 					if e.enraged && e.flash <= 0 do body = rl.Color{210, 50, 70, 255}
+					begin_ice(g, frozen)
 					if e.skin == .Mothership {
 						draw_mothership(ge, e.radius * 0.9, body, t, ph)
 					} else {
 						draw_whale(ge.pos, ge.angle, e.radius * 0.85, body, t, ph, true)
 					}
+					end_ice(frozen)
 					draw_boss_extras(g, ge)
 				}
 			}

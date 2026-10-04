@@ -20,6 +20,9 @@ import rl "vendor:raylib"
 //             Invisibility - 5 s (300 ticks) invulnerable, 10 s (600 ticks) cooldown
 //             Surprise     - 40 ticks: everything that touches you is reflected
 //                            (and can hurt the OTHER player), 15 s (900 ticks) cooldown
+//             Freeze       - everything except the players freezes for 3 s, then a 30 s cooldown
+//             Come Back    - teleport to where you were 5 s ago (health restored to that moment,
+//                            cooldowns keep running, your minions are rewound too); once per level
 //  * All cooldowns are counted in the fixed 60 Hz ticks (update_ticks in game.odin).
 // =============================================================================
 
@@ -32,6 +35,8 @@ skill_name :: proc(kind: SkillKind) -> cstring {
 	case .Invisibility: return "INVISIBILITY"
 	case .Surprise:     return "SURPRISE"
 	case .Repel:        return "REPEL"
+	case .Freeze:       return "FREEZE"
+	case .ComeBack:     return "COME BACK"
 	case .None:         return "NO SKILL"
 	}
 	return ""
@@ -44,6 +49,8 @@ skill_label :: proc(kind: SkillKind) -> cstring {
 	case .Invisibility: return "INV"
 	case .Surprise:     return "SUR"
 	case .Repel:        return "REP"
+	case .Freeze:       return "FRZ"
+	case .ComeBack:     return "CMB"
 	case .None:         return "-"
 	}
 	return "-"
@@ -56,6 +63,8 @@ skill_color :: proc(kind: SkillKind) -> rl.Color {
 	case .Invisibility: return rl.Color{120, 230, 255, 255}
 	case .Surprise:     return rl.Color{230, 110, 255, 255}
 	case .Repel:        return rl.Color{90, 255, 190, 255}
+	case .Freeze:       return rl.Color{110, 170, 255, 255}
+	case .ComeBack:     return rl.Color{255, 225, 90, 255}
 	case .None:         return rl.Color{150, 150, 160, 255}
 	}
 	return rl.WHITE
@@ -69,9 +78,18 @@ skill_base_cooldown :: proc(kind: SkillKind) -> i32 {
 	case .Invisibility: return INVIS_COOLDOWN_TICKS
 	case .Surprise:     return SURPRISE_COOLDOWN_TICKS
 	case .Repel:        return REPEL_COOLDOWN_TICKS
+	case .Freeze:       return FREEZE_COOLDOWN_TICKS // the 3 s freeze comes on top (see skill_total_cooldown)
+	case .ComeBack:     return 0                     // no timer: once per level (Player.comeback_used)
 	case .None:         return 0
 	}
 	return 0
+}
+
+// Ticks between pressing the skill and having it ready again (what the HUD wheel counts down).
+// Freeze: the 30 s only start once the 3 s freeze is over.
+skill_total_cooldown :: proc(p: Player, kind: SkillKind) -> i32 {
+	if kind == .Freeze do return FREEZE_DURATION_TICKS + skill_cooldown(p, FREEZE_COOLDOWN_TICKS)
+	return skill_cooldown(p, skill_base_cooldown(kind))
 }
 
 // The Cooldown enhancement (-10% per copy) shortens every skill cooldown.
@@ -135,6 +153,10 @@ activate_skill :: proc(g: ^Game, p: ^Player, index: int) {
 		add_shake(g, 3)
 	case .Repel:
 		use_repel(g, p, i32(index))
+	case .Freeze:
+		use_freeze(g, p)
+	case .ComeBack:
+		use_comeback(g, p, i32(index))
 	case .Rocket, .None:
 		// Rocket is passive: it changes what the gun fires.
 	}
@@ -239,6 +261,102 @@ use_repel :: proc(g: ^Game, p: ^Player, index: i32) {
 		q.knock = dir * push
 		spawn_burst(g, player_center(q), col, 12, 190, 3)
 	}
+}
+
+// --- Freeze ---
+
+// Everything that is not a player stops for FREEZE_DURATION_TICKS: enemies (and their
+// weapons), enemy bullets, asteroids and the spawners. Player shots keep flying, so a frozen
+// enemy can still be shot. Frozen enemies are drawn through the ice shader (render.odin) and
+// cannot hurt anyone. The 30 s cooldown starts after the thaw, so the timer is 3 s + 30 s.
+use_freeze :: proc(g: ^Game, p: ^Player) {
+	c := player_center(p^)
+	col := skill_color(.Freeze)
+	g.freeze_ticks = FREEZE_DURATION_TICKS
+	g.freeze_time  = g.time
+	p.skill_cd[.Freeze] = FREEZE_DURATION_TICKS + skill_cooldown(p^, FREEZE_COOLDOWN_TICKS)
+	p.freeze_visual = FREEZE_VISUAL_TIME
+	add_shake(g, 6)
+	spawn_ring(g, c, col, 56, 700, 0.6, 3.5)
+	spawn_ring(g, c, rl.WHITE, 28, 480, 0.45, 2.5)
+	spawn_burst(g, c, col, 30, 260, 3)
+	for &e in g.enemies {
+		if e.active do spawn_burst(g, e.pos, col, 5, 90, 2.5)
+	}
+}
+
+// 0..1: how solid the ice is (fades out over the last FREEZE_FADE_TICKS ticks).
+freeze_amount :: proc(g: ^Game) -> f32 {
+	return clamp(f32(g.freeze_ticks) / f32(FREEZE_FADE_TICKS), 0, 1)
+}
+
+// --- Come Back ---
+
+// Called once per 60 Hz tick while playing: remembers where everybody was.
+record_rewind :: proc(g: ^Game) {
+	for &p, i in g.players {
+		if p.dead do continue
+		buf := &g.rewind[i]
+		snap := RewindSnap{pos = p.pos, health_points = p.health_points}
+		for &m in g.minions {
+			if !m.exists || m.owner != i32(i) do continue
+			snap.minions[m.slot] = RewindMinion{valid = true, alive = m.alive, pos = m.pos, taken = m.taken}
+		}
+		buf.snaps[buf.head] = snap
+		buf.head = (buf.head + 1) % REWIND_TICKS
+		buf.count = min(buf.count + 1, REWIND_TICKS)
+	}
+}
+
+// Teleports the player back to where it was 5 s ago (the oldest memory if the level is younger
+// than that) with the health it had then. Cooldowns keep running; timers are not restored.
+// The player's minions are restored the same way (position, health, alive or dead).
+// Usable once per level.
+use_comeback :: proc(g: ^Game, p: ^Player, index: i32) {
+	if p.comeback_used do return
+	buf := &g.rewind[index]
+	if buf.count == 0 do return // nothing recorded yet: keep the charge
+
+	oldest := (buf.head - buf.count + REWIND_TICKS) % REWIND_TICKS
+	snap := buf.snaps[oldest]
+	col := skill_color(.ComeBack)
+
+	from := player_center(p^)
+	p.pos = snap.pos
+	p.health_points = min(snap.health_points, player_max_health(p^) - 1)
+	p.knock = {}
+	p.trail_n = 0
+	p.comeback_used = true
+	p.rewind_visual = COMEBACK_VISUAL_TIME
+	to := player_center(p^)
+
+	comeback_effect(g, from, to, col)
+
+	for &m in g.minions {
+		if !m.exists || m.owner != index do continue
+		rm := snap.minions[m.slot]
+		if !rm.valid do continue // it did not exist yet 5 s ago
+		mfrom := m.pos
+		m.pos = rm.pos
+		m.alive = rm.alive
+		m.taken = rm.taken
+		m.laser_ticks = 0
+		m.hit_cd = 0
+		comeback_effect(g, mfrom, m.pos, col)
+	}
+}
+
+// A line of sparks from where you were to where you are now, plus a flash at both ends.
+comeback_effect :: proc(g: ^Game, from, to: [2]f32, col: rl.Color) {
+	steps :: 24
+	for i in 0 ..< steps {
+		k := f32(i) / f32(steps - 1)
+		spawn_particle(g, from + (to - from) * k, rand_vec2() * 30, col, 0.55, 3)
+	}
+	spawn_ring(g, from, col, 28, 220, 0.4, 3)
+	spawn_ring(g, to, rl.WHITE, 28, 260, 0.45, 3)
+	spawn_burst(g, to, col, 24, 220, 3)
+	add_shake(g, 5)
 }
 
 // --- The gun ---
@@ -526,7 +644,13 @@ spawn_skill_pickup :: proc(g: ^Game, pos: [2]f32) {
 // Very rare from any enemy; 25% from a boss on a "10th level".
 roll_skill_drop :: proc(g: ^Game, pos: [2]f32, from_boss: bool) {
 	chance: f32 = SKILL_DROP_CHANCE
-	if from_boss && g.level % SKILL_BOSS_LEVEL_INTERVAL == 0 do chance = SKILL_BOSS_DROP_CHANCE
+	if from_boss {
+		if g.level == SKILL_BOSS_GUARANTEED_LEVEL {
+			chance = SKILL_BOSS_GUARANTEED_CHANCE // level 5: always (100%)
+		} else if g.level % SKILL_BOSS_LEVEL_INTERVAL == 0 {
+			chance = SKILL_BOSS_DROP_CHANCE
+		}
+	}
 	if rand.float32() < chance do spawn_skill_pickup(g, pos + [2]f32{0, 40})
 }
 

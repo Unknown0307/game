@@ -111,9 +111,13 @@ draw_ship_dart :: proc(g: ^Game, p: Player, col: rl.Color, s: f32) {
 		rl.EndBlendMode()
 	}
 
-	// 3. Hull: two triangles through the energy shader.
-	set_ship_shader(g.shaders.ship, t, col)
-	rl.BeginShaderMode(g.shaders.ship.shader)
+	// 2b. Energy aura (shader): a pulsing halo with two rings of rotating arcs around the ship.
+	draw_ship_aura(g.shaders.aura, c, g.shake_off, hh * 2.1, t, thr, color_vec(ice))
+
+	// 3. Hull: two triangles through Player 1's plasma shader (DART_FS: iridescent energy that
+	//    flows from nose to tail, glowing veins, sparkles - it follows the ship's heading).
+	set_dart_shader(g.shaders.dart, c, g.shake_off, a, thr, t, color_vec(col))
+	rl.BeginShaderMode(g.shaders.dart.shader)
 	draw_tri_ccw(nose, tip_l, notch, col)
 	draw_tri_ccw(nose, notch, tip_r, col)
 	rl.EndShaderMode()
@@ -239,6 +243,36 @@ draw_ship_bulwark :: proc(g: ^Game, p: Player, col: rl.Color, s: f32) {
 	draw_poly_outline(pod[:], edge)
 	draw_poly_outline(boom[0][:], edge)
 	draw_poly_outline(boom[1][:], edge)
+
+	// 5b. Details: armour seams, rivets, boom nose plates, gun barrels, a chevron emblem on the
+	//     nose, a blinking sensor mast and glowing rear heat vents.
+	seam := rl.Fade(rl.BLACK, 0.55)
+	rl.DrawLineV(at(c, a, u, -0.05, -0.30), at(c, a, u, -0.05, 0.30), seam)
+	rl.DrawLineV(at(c, a, u, 0.48, -0.20), at(c, a, u, 0.48, 0.20), seam)
+	rl.DrawLineV(at(c, a, u, 0.72, 0), at(c, a, u, -0.25, 0), rl.Fade(rl.BLACK, 0.35))
+	for side in ([2]f32{-1, 1}) {
+		rl.DrawLineV(at(c, a, u, -0.20, side * 0.55), at(c, a, u, -0.20, side * 0.98), seam)
+		rl.DrawLineV(at(c, a, u, 0.20, side * 0.55), at(c, a, u, 0.20, side * 0.98), seam)
+		for k in 0 ..< 5 {
+			rl.DrawCircleV(at(c, a, u, -0.55 + f32(k) * 0.26, side * 0.90), max(0.7, u * 0.03), rl.Fade(rl.WHITE, 0.55))
+		}
+		draw_tri_ccw(at(c, a, u, 1.12, side * 0.78), at(c, a, u, 0.58, side * 0.95), at(c, a, u, 0.58, side * 0.62), rl.Fade(rl.Color{86, 100, 112, 255}, 0.9))
+		rl.DrawLineEx(at(c, a, u, 0.95, side * 0.78), at(c, a, u, 1.27, side * 0.78), max(2.0, u * 0.16), rl.Color{18, 22, 26, 255})
+		rl.DrawLineEx(at(c, a, u, 0.95, side * 0.78), at(c, a, u, 1.27, side * 0.78), max(1.0, u * 0.05), rl.Fade(amber, 0.65))
+	}
+	for k in 0 ..< 2 {
+		x := 0.82 - f32(k) * 0.18
+		rl.DrawLineEx(at(c, a, u, x - 0.10, -0.11), at(c, a, u, x + 0.05, 0), 1.5 * s, rl.Fade(amber, 0.9))
+		rl.DrawLineEx(at(c, a, u, x + 0.05, 0), at(c, a, u, x - 0.10, 0.11), 1.5 * s, rl.Fade(amber, 0.9))
+	}
+	mast_tip := at(c, a, u, 1.22, 0)
+	rl.DrawLineEx(at(c, a, u, 0.98, 0), mast_tip, max(1.0, 1.1 * s), rl.Fade(rl.WHITE, 0.8))
+	rl.BeginBlendMode(.ADDITIVE)
+	if math.sin(t * 6.5) > 0.2 do rl.DrawCircleV(mast_tip, max(1.5, u * 0.07), rl.Fade(rl.Color{255, 70, 70, 255}, 0.95))
+	for y in ([3]f32{-0.16, 0, 0.16}) {
+		rl.DrawLineEx(at(c, a, u, -0.74, y), at(c, a, u, -0.88, y), max(1.5, u * 0.06), rl.Fade(rl.Color{255, 120, 40, 255}, 0.25 + 0.55 * thr))
+	}
+	rl.EndBlendMode()
 
 	// 6. Gun muzzles at the boom tips, pulsing.
 	rl.BeginBlendMode(.ADDITIVE)

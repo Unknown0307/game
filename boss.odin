@@ -139,7 +139,7 @@ update_boss_ai :: proc(g: ^Game, e: ^Enemy, dt: f32) -> (hold_position: bool) {
 
 	// Both players are away from the repel radius: send minions their way.
 	_, _, found := nearest_player(g, e.pos)
-	if found && e.summon_cd <= 0 {
+	if found && e.summon_cd <= 0 && g.params.boss_summons {
 		e.summon_cd = g.params.boss_summon_cd * (0.6 if e.enraged else 1.0)
 		boss_summon(g, e)
 	}

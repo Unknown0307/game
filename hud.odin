@@ -95,9 +95,13 @@ skill_progress :: proc(p: Player, kind: SkillKind) -> f32 {
 		if p.skill != .Rocket do return 1
 		return 1 - f32(p.fire_cd) / f32(skill_cooldown(p, ROCKET_COOLDOWN_TICKS))
 	}
+	if kind == .ComeBack { // once per level: no timer, either ready or used
+		if p.comeback_used do return 0
+		return 1
+	}
 	cd := p.skill_cd[kind]
 	if cd <= 0 do return 1
-	return 1 - f32(cd) / f32(skill_cooldown(p, skill_base_cooldown(kind)))
+	return clamp(1 - f32(cd) / f32(skill_total_cooldown(p, kind)), 0, 1)
 }
 
 draw_skill_wheel :: proc(p: Player, right_align: bool) {
@@ -191,6 +195,18 @@ draw_skill_wheel :: proc(p: Player, right_align: bool) {
 	case p.skill == .Surprise && p.surprise_ticks > 0:
 		status = "REFLECTING!"
 		scol = skill_color(.Surprise)
+	case p.skill == .ComeBack:
+		if p.comeback_used {
+			status = "USED THIS LEVEL"
+			scol = rl.Fade(rl.LIGHTGRAY, 0.7)
+		} else {
+			status = p.ready_text
+			scol = rl.WHITE
+		}
+	case p.skill == .Freeze && p.skill_cd[.Freeze] > skill_cooldown(p, FREEZE_COOLDOWN_TICKS):
+		// still inside the 3 s freeze: the 30 s cooldown has not started yet
+		status = fmt.ctprintf("FROZEN %.1fs", f32(p.skill_cd[.Freeze] - skill_cooldown(p, FREEZE_COOLDOWN_TICKS)) / TICK_RATE)
+		scol = skill_color(.Freeze)
 	case p.skill_cd[p.skill] > 0:
 		status = fmt.ctprintf("%.1fs", f32(p.skill_cd[p.skill]) / TICK_RATE)
 	case:
@@ -242,16 +258,34 @@ draw_boss_warning :: proc(g: ^Game) {
 	if g.boss_warn <= 0 do return
 	pulse := 0.5 + 0.5 * math.sin(g.time * 12)
 	rl.DrawRectangle(0, 0, SCREEN_W, SCREEN_H, rl.Fade(rl.RED, 0.07 * pulse))
-	draw_centered("!! BOSS INCOMING !!", 110, 34, rl.Fade(rl.RED, 0.5 + 0.5 * pulse))
+	title: cstring = "!! BOSS INCOMING !!"
+	if count_bosses(g) > 1 do title = "!! TWO BOSSES INCOMING !!"
+	draw_centered(title, 110, 34, rl.Fade(rl.RED, 0.5 + 0.5 * pulse))
 	if g.params.boss_has_ability {
-		draw_centered("It repels intruders and summons minions", 150, 18, rl.Fade(BOSS_PURPLE, 0.6 + 0.4 * pulse))
+		msg: cstring = "It repels intruders and summons minions"
+		if !g.params.boss_summons do msg = "It repels intruders - but it fights alone"
+		draw_centered(msg, 150, 18, rl.Fade(BOSS_PURPLE, 0.6 + 0.4 * pulse))
 	}
 	for e in g.enemies {
 		if e.active && e.kind == .Boss && e.skin == .Mothership {
-			draw_centered("MOTHERSHIP: bullets, a raygun and drone minions", 175, 18, rl.Fade(RAYGUN_COLOR, 0.6 + 0.4 * pulse))
+			msg: cstring = "MOTHERSHIP: bullets, a raygun and drone minions"
+			if !g.params.boss_summons do msg = "MOTHERSHIP: bullets and a raygun"
+			draw_centered(msg, 175, 18, rl.Fade(RAYGUN_COLOR, 0.6 + 0.4 * pulse))
 			break
 		}
 	}
+}
+
+// While the world is frozen: a frosty border and a countdown under the level info.
+draw_freeze_overlay :: proc(g: ^Game) {
+	if g.freeze_ticks <= 0 do return
+	k := freeze_amount(g)
+	ice := rl.Color{150, 210, 255, 255}
+	for i in 0 ..< 8 {
+		inset := f32(i) * 5
+		rl.DrawRectangleLinesEx(rl.Rectangle{inset, inset, f32(SCREEN_W) - 2 * inset, f32(SCREEN_H) - 2 * inset}, 5, rl.Fade(ice, (0.16 - 0.018 * f32(i)) * k))
+	}
+	draw_centered(fmt.ctprintf("FROZEN  %.1fs", f32(g.freeze_ticks) / TICK_RATE), 74, 16, rl.Fade(ice, 0.9))
 }
 
 // --- Phase screens ---
@@ -352,6 +386,7 @@ render_ui :: proc(g: ^Game) {
 	}
 
 	draw_boss_warning(g)
+	draw_freeze_overlay(g)
 
 	for p, i in g.players {
 		draw_player_hud(p, i == 1)
