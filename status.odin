@@ -15,12 +15,12 @@ import rl "vendor:raylib"
 // =============================================================================
 
 StatusDef :: struct {
-	name:  cstring,   // HUD / long text
-	label: cstring,   // 3-letter tag shown in the slot
-	color: rl.Color,
+	name:               cstring, // HUD / long text
+	label:              cstring, // 3-letter tag shown in the slot
+	color:              rl.Color,
 
 	// Chance weight when a status drop is rolled (0 = never drops).
-	drop_weight: f32,
+	drop_weight:        f32,
 
 	// Passive modifiers, applied PER COPY. 0 means "no effect".
 	size_bonus:         f32, // +fraction of body size   (0.05 = +5%)
@@ -29,31 +29,68 @@ StatusDef :: struct {
 	max_health_bonus:   f32, // +fraction of the base max health
 
 	// Optional: runs once when a copy is picked up (player_index = slot in g.players).
-	on_apply: proc(g: ^Game, p: ^Player, player_index: i32),
+	on_apply:           proc(g: ^Game, p: ^Player, player_index: i32),
 }
 
 // The registry. One case per status.
 status_def :: proc(kind: StatusKind) -> StatusDef {
 	switch kind {
 	case .Extension:
-		return StatusDef{name = "EXTENSION +5%", label = "EXT", color = rl.SKYBLUE,
-			drop_weight = 1, size_bonus = 0.05}
+		return StatusDef {
+			name = "EXTENSION +5%",
+			label = "EXT",
+			color = rl.SKYBLUE,
+			drop_weight = 1,
+			size_bonus = 0.05,
+		}
 	case .Cooldown:
-		return StatusDef{name = "COOLDOWN -10%", label = "CD", color = rl.GOLD,
-			drop_weight = 1, cooldown_reduction = 0.10}
+		return StatusDef {
+			name = "COOLDOWN -10%",
+			label = "CD",
+			color = rl.GOLD,
+			drop_weight = 1,
+			cooldown_reduction = 0.10,
+		}
 	case .Damage:
-		return StatusDef{name = "DAMAGE TAKEN -10%", label = "DMG", color = rl.VIOLET,
-			drop_weight = 1, damage_reduction = 0.10}
+		return StatusDef {
+			name = "DAMAGE TAKEN -10%",
+			label = "DMG",
+			color = rl.VIOLET,
+			drop_weight = 1,
+			damage_reduction = 0.10,
+		}
 	case .MaxHealth:
-		return StatusDef{name = "MAX HEALTH +10%", label = "HP+", color = rl.Color{255, 100, 120, 255},
-			drop_weight = 1, max_health_bonus = MAX_HEALTH_BONUS_PER_COPY}
+		return StatusDef {
+			name = "MAX HEALTH +10%",
+			label = "HP+",
+			color = rl.Color{255, 100, 120, 255},
+			drop_weight = 1,
+			max_health_bonus = MAX_HEALTH_BONUS_PER_COPY,
+		}
 	case .Minion:
-		return StatusDef{name = "MINION", label = "MIN", color = rl.Color{110, 255, 170, 255},
-			drop_weight = 1, on_apply = status_apply_minion}
+		return StatusDef {
+			name = "MINION",
+			label = "MIN",
+			color = rl.Color{110, 255, 170, 255},
+			drop_weight = 1,
+			on_apply = status_apply_minion,
+		}
+	case .LifeSteal:
+		return StatusDef {
+			name = "HEALTH +1%",
+			label = "LF",
+			color = rl.Color{180, 0, 0, 255},
+			drop_weight = 10,
+			on_apply = status_apply_lifesteal,
+		}
 	case .None:
 		return StatusDef{name = "", label = "?", color = rl.Color{190, 210, 255, 255}}
 	}
 	return StatusDef{label = "?", color = rl.WHITE}
+}
+
+status_apply_lifesteal :: proc(g: ^Game, p: ^Player, player_index: i32) {
+	p.health_points += LIFESTEAL_RATE / p.health_points
 }
 
 // The Minion status spawns its drone (it needs the Game, so it is an on_apply hook).
@@ -63,9 +100,9 @@ status_apply_minion :: proc(g: ^Game, p: ^Player, player_index: i32) {
 
 // --- Convenience wrappers (keep call sites short) ---
 
-status_name  :: proc(kind: StatusKind) -> cstring  { return status_def(kind).name }
-status_label :: proc(kind: StatusKind) -> cstring  { return status_def(kind).label }
-status_color :: proc(kind: StatusKind) -> rl.Color { return status_def(kind).color }
+status_name :: proc(kind: StatusKind) -> cstring {return status_def(kind).name}
+status_label :: proc(kind: StatusKind) -> cstring {return status_def(kind).label}
+status_color :: proc(kind: StatusKind) -> rl.Color {return status_def(kind).color}
 
 // Weighted random pick among statuses that can drop.
 random_status_kind :: proc() -> StatusKind {
@@ -98,8 +135,10 @@ status_reduction_mult :: proc(p: Player, field: StatusModifier) -> f32 {
 		d := status_def(p.statuses[i])
 		r: f32
 		switch field {
-		case .Cooldown: r = d.cooldown_reduction
-		case .Damage:   r = d.damage_reduction
+		case .Cooldown:
+			r = d.cooldown_reduction
+		case .Damage:
+			r = d.damage_reduction
 		}
 		mult *= 1.0 - r
 	}
@@ -145,4 +184,3 @@ apply_status :: proc(g: ^Game, p: ^Player, player_index: i32, kind: StatusKind) 
 	if def.on_apply != nil do def.on_apply(g, p, player_index)
 	return true
 }
-
