@@ -103,11 +103,11 @@ ExplosionShader :: struct {
 }
 
 Shaders :: struct {
-	blast: BlastShader,
-	ship:  ShipShader,
-	nebula: NebulaShader,
-	hole:   HoleShader,
-	freeze: FreezeShader,
+	blast:     BlastShader,
+	ship:      ShipShader,
+	nebula:    NebulaShader,
+	hole:      HoleShader,
+	freeze:    FreezeShader,
 	booster:   BoosterShader,
 	explosion: ExplosionShader,
 }
@@ -126,61 +126,61 @@ load_shaders :: proc() -> Shaders {
 	fs := load_fragment(FREEZE_FS)
 	au := load_fragment(BOOSTER_FS)
 	es := load_fragment(EXPLOSION_FS)
-	return Shaders{
-		freeze = FreezeShader{
-			shader     = fs,
-			time_loc   = rl.GetShaderLocation(fs, "time"),
+	return Shaders {
+		freeze = FreezeShader {
+			shader = fs,
+			time_loc = rl.GetShaderLocation(fs, "time"),
 			amount_loc = rl.GetShaderLocation(fs, "amount"),
 		},
-		booster = BoosterShader{
-			shader     = au,
-			time_loc   = rl.GetShaderLocation(au, "time"),
+		booster = BoosterShader {
+			shader = au,
+			time_loc = rl.GetShaderLocation(au, "time"),
 			center_loc = rl.GetShaderLocation(au, "center"),
-			angle_loc  = rl.GetShaderLocation(au, "angle"),
+			angle_loc = rl.GetShaderLocation(au, "angle"),
 			length_loc = rl.GetShaderLocation(au, "flameLen"),
-			width_loc  = rl.GetShaderLocation(au, "width"),
+			width_loc = rl.GetShaderLocation(au, "width"),
 			thrust_loc = rl.GetShaderLocation(au, "thrust"),
-			seed_loc   = rl.GetShaderLocation(au, "seed"),
+			seed_loc = rl.GetShaderLocation(au, "seed"),
 		},
-		explosion = ExplosionShader{
-			shader     = es,
+		explosion = ExplosionShader {
+			shader = es,
 			center_loc = rl.GetShaderLocation(es, "center"),
 			radius_loc = rl.GetShaderLocation(es, "radius"),
-			max_loc    = rl.GetShaderLocation(es, "maxRadius"),
-			prog_loc   = rl.GetShaderLocation(es, "progress"),
-			tint_loc   = rl.GetShaderLocation(es, "tint"),
-			seed_loc   = rl.GetShaderLocation(es, "seed"),
+			max_loc = rl.GetShaderLocation(es, "maxRadius"),
+			prog_loc = rl.GetShaderLocation(es, "progress"),
+			tint_loc = rl.GetShaderLocation(es, "tint"),
+			seed_loc = rl.GetShaderLocation(es, "seed"),
 		},
-		blast = BlastShader{
-			shader     = bs,
+		blast = BlastShader {
+			shader = bs,
 			center_loc = rl.GetShaderLocation(bs, "center"),
 			radius_loc = rl.GetShaderLocation(bs, "radius"),
-			max_loc    = rl.GetShaderLocation(bs, "maxRadius"),
-			prog_loc   = rl.GetShaderLocation(bs, "progress"),
-			tint_loc   = rl.GetShaderLocation(bs, "tint"),
+			max_loc = rl.GetShaderLocation(bs, "maxRadius"),
+			prog_loc = rl.GetShaderLocation(bs, "progress"),
+			tint_loc = rl.GetShaderLocation(bs, "tint"),
 		},
-		ship = ShipShader{
-			shader   = ss,
+		ship = ShipShader {
+			shader = ss,
 			time_loc = rl.GetShaderLocation(ss, "time"),
 			tint_loc = rl.GetShaderLocation(ss, "tint"),
 		},
-		nebula = NebulaShader{
-			shader   = ns,
+		nebula = NebulaShader {
+			shader = ns,
 			time_loc = rl.GetShaderLocation(ns, "time"),
 			seed_loc = rl.GetShaderLocation(ns, "seed"),
 			base_loc = rl.GetShaderLocation(ns, "base"),
-			a_loc    = rl.GetShaderLocation(ns, "colA"),
-			b_loc    = rl.GetShaderLocation(ns, "colB"),
+			a_loc = rl.GetShaderLocation(ns, "colA"),
+			b_loc = rl.GetShaderLocation(ns, "colB"),
 		},
-		hole = HoleShader{
-			shader      = hs,
-			center_loc  = rl.GetShaderLocation(hs, "center"),
+		hole = HoleShader {
+			shader = hs,
+			center_loc = rl.GetShaderLocation(hs, "center"),
 			horizon_loc = rl.GetShaderLocation(hs, "horizon"),
-			time_loc    = rl.GetShaderLocation(hs, "time"),
-			boost_loc   = rl.GetShaderLocation(hs, "boost"),
-			fade_loc    = rl.GetShaderLocation(hs, "fade"),
-			hot_loc     = rl.GetShaderLocation(hs, "hot"),
-			cool_loc    = rl.GetShaderLocation(hs, "cool"),
+			time_loc = rl.GetShaderLocation(hs, "time"),
+			boost_loc = rl.GetShaderLocation(hs, "boost"),
+			fade_loc = rl.GetShaderLocation(hs, "fade"),
+			hot_loc = rl.GetShaderLocation(hs, "hot"),
+			cool_loc = rl.GetShaderLocation(hs, "cool"),
 		},
 	}
 }
@@ -204,7 +204,11 @@ set_freeze_shader :: proc(s: FreezeShader, t, amount: f32) {
 
 // One booster flame: a quad around the nozzle drawn additively through BOOSTER_FS.
 // `nozzle` is in canvas pixels (inside the shaken camera); `shake_off` is that camera offset.
-draw_booster :: proc(b: BoosterShader, nozzle, shake_off: [2]f32, angle, length, width, thrust, t, seed: f32) {
+draw_booster :: proc(
+	b: BoosterShader,
+	nozzle, shake_off: [2]f32,
+	angle, length, width, thrust, t, seed: f32,
+) {
 	c := [2]f32{nozzle.x + shake_off.x, f32(SCREEN_H) - (nozzle.y + shake_off.y)}
 	an, ln, wd, th, tt, sd := angle, length, width, thrust, t, seed
 	rl.SetShaderValue(b.shader, b.center_loc, &c, .VEC2)
@@ -218,14 +222,25 @@ draw_booster :: proc(b: BoosterShader, nozzle, shake_off: [2]f32, angle, length,
 	extent := i32(length + width * 3 + 16) // the flame points away from the ship, but the bloom is round
 	rl.BeginBlendMode(.ADDITIVE)
 	rl.BeginShaderMode(b.shader)
-	rl.DrawRectangle(i32(nozzle.x) - extent, i32(nozzle.y) - extent, extent * 2, extent * 2, rl.WHITE)
+	rl.DrawRectangle(
+		i32(nozzle.x) - extent,
+		i32(nozzle.y) - extent,
+		extent * 2,
+		extent * 2,
+		rl.WHITE,
+	)
 	rl.EndShaderMode()
 	rl.EndBlendMode()
 }
 
 // The Explosion skill's fireball. progress: 0 at the blast, 1 when it has finished. The front
 // races out fast and slows down (ease-out), like a real blast wave.
-draw_explosion :: proc(e: ExplosionShader, center: [2]f32, progress, max_radius: f32, tint: [3]f32) {
+draw_explosion :: proc(
+	e: ExplosionShader,
+	center: [2]f32,
+	progress, max_radius: f32,
+	tint: [3]f32,
+) {
 	c := [2]f32{center.x, f32(SCREEN_H) - center.y}
 	inv := 1.0 - progress
 	radius := max_radius * (1.0 - inv * inv * inv)
@@ -244,7 +259,13 @@ draw_explosion :: proc(e: ExplosionShader, center: [2]f32, progress, max_radius:
 	extent := i32(max_radius) + 40
 	rl.BeginBlendMode(.ADDITIVE)
 	rl.BeginShaderMode(e.shader)
-	rl.DrawRectangle(i32(center.x) - extent, i32(center.y) - extent, extent * 2, extent * 2, rl.WHITE)
+	rl.DrawRectangle(
+		i32(center.x) - extent,
+		i32(center.y) - extent,
+		extent * 2,
+		extent * 2,
+		rl.WHITE,
+	)
 	rl.EndShaderMode()
 	rl.EndBlendMode()
 }
@@ -266,7 +287,13 @@ draw_blast :: proc(b: BlastShader, center: [2]f32, progress, max_radius: f32, ti
 	extent := i32(max_radius) + 40
 	rl.BeginBlendMode(.ADDITIVE)
 	rl.BeginShaderMode(b.shader)
-	rl.DrawRectangle(i32(center.x) - extent, i32(center.y) - extent, extent * 2, extent * 2, rl.WHITE)
+	rl.DrawRectangle(
+		i32(center.x) - extent,
+		i32(center.y) - extent,
+		extent * 2,
+		extent * 2,
+		rl.WHITE,
+	)
 	rl.EndShaderMode()
 	rl.EndBlendMode()
 }
@@ -287,7 +314,12 @@ draw_nebula :: proc(n: NebulaShader, t: f32, seed: [2]f32, base, col_a, col_b: [
 // `center` is in canvas pixels (origin top-left, inside the shaken camera);
 // `shake_off` is the camera offset so the shader (which works in framebuffer
 // pixels) lines up with the shaken picture.
-draw_hole_shader :: proc(h: HoleShader, center, shake_off: [2]f32, horizon, t, boost, fade: f32, hot, cool: [3]f32) {
+draw_hole_shader :: proc(
+	h: HoleShader,
+	center, shake_off: [2]f32,
+	horizon, t, boost, fade: f32,
+	hot, cool: [3]f32,
+) {
 	c := [2]f32{center.x + shake_off.x, f32(SCREEN_H) - (center.y + shake_off.y)}
 	hz, tt, bo, fd, ht, cl := horizon, t, boost, fade, hot, cool
 	rl.SetShaderValue(h.shader, h.center_loc, &c, .VEC2)
@@ -301,7 +333,13 @@ draw_hole_shader :: proc(h: HoleShader, center, shake_off: [2]f32, horizon, t, b
 	extent := i32(horizon * 7.0)
 	rl.BeginBlendMode(.ALPHA_PREMULTIPLY)
 	rl.BeginShaderMode(h.shader)
-	rl.DrawRectangle(i32(center.x) - extent, i32(center.y) - extent, extent * 2, extent * 2, rl.WHITE)
+	rl.DrawRectangle(
+		i32(center.x) - extent,
+		i32(center.y) - extent,
+		extent * 2,
+		extent * 2,
+		rl.WHITE,
+	)
 	rl.EndShaderMode()
 	rl.EndBlendMode()
 }

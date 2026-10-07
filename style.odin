@@ -16,15 +16,15 @@ style_byte :: proc(seed: f32, frequency, phase, low, high: f32) -> u8 {
 
 // Eight space palettes: {deep background, accent, accent2}. Levels cycle through
 // them (5 is coprime to 8, so neighbouring levels never share a palette).
-PALETTES :: [8][3]rl.Color{
+PALETTES :: [8][3]rl.Color {
 	{{10, 12, 38, 255}, {110, 140, 255, 255}, {190, 120, 255, 255}}, // deep indigo
-	{{26, 8, 40, 255},  {255, 110, 230, 255}, {130, 110, 255, 255}}, // violet nebula
-	{{6, 28, 34, 255},  {70, 235, 210, 255},  {90, 170, 255, 255}},  // teal void
-	{{36, 10, 12, 255}, {255, 120, 70, 255},  {255, 200, 90, 255}},  // ember
-	{{6, 30, 22, 255},  {90, 255, 160, 255},  {80, 210, 230, 255}},  // emerald
-	{{34, 6, 26, 255},  {255, 80, 140, 255},  {200, 90, 255, 255}},  // crimson-magenta
-	{{6, 16, 44, 255},  {60, 200, 255, 255},  {120, 140, 255, 255}}, // cobalt
-	{{30, 22, 8, 255},  {255, 200, 100, 255}, {255, 140, 120, 255}}, // golden dust
+	{{26, 8, 40, 255}, {255, 110, 230, 255}, {130, 110, 255, 255}}, // violet nebula
+	{{6, 28, 34, 255}, {70, 235, 210, 255}, {90, 170, 255, 255}}, // teal void
+	{{36, 10, 12, 255}, {255, 120, 70, 255}, {255, 200, 90, 255}}, // ember
+	{{6, 30, 22, 255}, {90, 255, 160, 255}, {80, 210, 230, 255}}, // emerald
+	{{34, 6, 26, 255}, {255, 80, 140, 255}, {200, 90, 255, 255}}, // crimson-magenta
+	{{6, 16, 44, 255}, {60, 200, 255, 255}, {120, 140, 255, 255}}, // cobalt
+	{{30, 22, 8, 255}, {255, 200, 100, 255}, {255, 140, 120, 255}}, // golden dust
 }
 
 jitter_byte :: proc(c: u8, s, freq, phase: f32) -> u8 {
@@ -36,37 +36,42 @@ level_style :: proc(level: i32) -> LevelStyle {
 	palettes := PALETTES
 	pal := palettes[(level * 5 + level / 8) % 8]
 
-	bg := rl.Color{
+	bg := rl.Color {
 		jitter_byte(pal[0].r, s, 1.173, 0.7),
 		jitter_byte(pal[0].g, s, 0.731, 2.1),
 		jitter_byte(pal[0].b, s, 0.947, 4.4),
 		255,
 	}
-	accent := rl.Color{
+	accent := rl.Color {
 		jitter_byte(pal[1].r, s, 1.913, 1.2),
 		jitter_byte(pal[1].g, s, 1.271, 3.8),
 		jitter_byte(pal[1].b, s, 1.587, 5.4),
 		255,
 	}
-	accent2 := rl.Color{
+	accent2 := rl.Color {
 		jitter_byte(pal[2].r, s, 1.447, 4.6),
 		jitter_byte(pal[2].g, s, 1.109, 1.7),
 		jitter_byte(pal[2].b, s, 1.821, 2.9),
 		255,
 	}
-	bg_alt := rl.Color{u8(min(f32(bg.r) * 1.5, 255)), u8(min(f32(bg.g) * 1.5, 255)), u8(min(f32(bg.b) * 1.5, 255)), 255}
+	bg_alt := rl.Color {
+		u8(min(f32(bg.r) * 1.5, 255)),
+		u8(min(f32(bg.g) * 1.5, 255)),
+		u8(min(f32(bg.b) * 1.5, 255)),
+		255,
+	}
 
 	pattern: i32 = i32(abs(math.sin(s * 0.917)) * 4.0)
 	spacing := i32(28 + int(abs(math.cos(s * 0.643)) * 44.0))
 
-	return LevelStyle{
-		background     = bg,
+	return LevelStyle {
+		background = bg,
 		background_alt = bg_alt,
-		grid           = rl.Fade(accent, 0.23),
-		accent         = accent,
-		accent2        = accent2,
-		grid_spacing   = spacing,
-		pattern        = pattern,
+		grid = rl.Fade(accent, 0.23),
+		accent = accent,
+		accent2 = accent2,
+		grid_spacing = spacing,
+		pattern = pattern,
 	}
 }
 
@@ -124,9 +129,9 @@ hole_state :: proc(g: ^Game) -> HoleState {
 draw_starfield :: proc(style: LevelStyle, level: i32, t: f32, hs: HoleState) {
 	counts := [3]int{130, 70, 28}
 	speeds := [3]f32{6.0, 14.0, 30.0}
-	dims   := [3]f32{0.55, 0.78, 1.0}
-	seed   := u32(level) * 7919 + 17
-	pc     := portal_center()
+	dims := [3]f32{0.55, 0.78, 1.0}
+	seed := u32(level) * 7919 + 17
+	pc := portal_center()
 	lens: f32 = 0
 	if hs.active do lens = hs.fade * (0.3 * hs.radius / BLACK_HOLE_RADIUS + 0.8 * hs.boost)
 
@@ -134,8 +139,8 @@ draw_starfield :: proc(style: LevelStyle, level: i32, t: f32, hs: HoleState) {
 	idx: u32 = 0
 	for layer in 0 ..< 3 {
 		for _ in 0 ..< counts[layer] {
-			x  := star_rand(seed + idx * 4 + 0) * SCREEN_W
-			y  := star_rand(seed + idx * 4 + 1) * SCREEN_H
+			x := star_rand(seed + idx * 4 + 0) * SCREEN_W
+			y := star_rand(seed + idx * 4 + 1) * SCREEN_H
 			br := star_rand(seed + idx * 4 + 2)
 			tw := star_rand(seed + idx * 4 + 3)
 			idx += 1
@@ -189,7 +194,7 @@ draw_black_hole :: proc(g: ^Game, hs: HoleState, shake_off: [2]f32) {
 	st := g.style
 
 	warm := [3]f32{1.0, 0.78, 0.45}
-	hot  := warm * 0.7 + color_vec(st.accent) * 0.3
+	hot := warm * 0.7 + color_vec(st.accent) * 0.3
 	cool := color_vec(st.accent2)
 
 	breathe := 1.0 + 0.03 * math.sin(t * 3.0)
